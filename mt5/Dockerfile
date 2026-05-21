@@ -16,12 +16,11 @@ RUN apt-get update && apt-get install -y \
 # Enable 32-bit architecture (required for Wine)
 RUN dpkg --add-architecture i386
 
-# Add official WineHQ repository (Installs stable Wine 11 instead of older versions)
+# Install WineHQ Stable, Virtual Desktop tools, noVNC, supervisor, unzip, xterm, AND tint2 (Taskbar)
 RUN mkdir -pm755 /etc/apt/keyrings && \
     wget -O /etc/apt/keyrings/winehq-archive.key https://dl.winehq.org/wine-builds/winehq.key && \
     wget -NP /etc/apt/sources.list.d/ https://dl.winehq.org/wine-builds/ubuntu/dists/jammy/winehq-jammy.sources
 
-# Install WineHQ Stable, Virtual Desktop tools (xvfb, x11vnc, openbox), noVNC, supervisor, and unzip
 RUN apt-get update && apt-get install -y \
     winehq-stable \
     xvfb \
@@ -31,6 +30,9 @@ RUN apt-get update && apt-get install -y \
     websockify \
     supervisor \
     unzip \
+    xterm \
+    tint2 \
+    libgnutls30:i386 \
     && rm -rf /var/lib/apt/lists/*
 
 # Create a symlink so the web interface loads automatically when visiting port 8080

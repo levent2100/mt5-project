@@ -5,9 +5,12 @@ services:
     build:
       context: .
       dockerfile: mt5/Dockerfile
-    privileged: true # <--- CRITICAL: Grants full system call access at runtime
+    privileged: true # Grants full system call access for Wine 11
     environment:
       - VNC_PASSWD=MySafeTradingPassword123!
+    volumes:
+      # Link the startup script directly so edits on the host apply instantly [1]
+      - ./mt5/start_cluster.sh:/root/start_cluster.sh
     ports:
       - "127.0.0.1:18812-18821:18812-18821"  # Python RPC Ports
       - "127.0.0.1:8080:8080"                # Secure noVNC Port
