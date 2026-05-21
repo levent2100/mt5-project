@@ -58,6 +58,6 @@ COPY ./mt5/supervisord.conf /etc/supervisor/conf.d/mt5.conf
 
 # Port mappings inside the container
 EXPOSE 8080
-EXPOSE 18812-18821
+EXPOSE 58809-58818
 
 CMD ["/usr/bin/supervisord"]

@@ -9,9 +9,13 @@ services:
     environment:
       - VNC_PASSWD=MySafeTradingPassword123!
     volumes:
-      # Link the startup script directly so edits on the host apply instantly [1]
+      # Link the startup script directly so edits on the host apply instantly
       - ./mt5/start_cluster.sh:/root/start_cluster.sh
+      # Mount your host scripts folder inside the container
+      - /pjt_src/stockai/mt5code:/root/scripts
     ports:
-      - "127.0.0.1:18812-18821:18812-18821"  # Python RPC Ports
+      - "127.0.0.1:58809-58818:58809-58818"  # Mapped ports for your 10 custom HTTP Python scripts
       - "127.0.0.1:8080:8080"                # Secure noVNC Port
+      - "127.0.0.1:5900:5900"
     restart: always
+    

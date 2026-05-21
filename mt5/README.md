@@ -78,7 +78,7 @@ Because different brokers (e.g., Tickmill, IC Markets) require custom, branded i
 ### 1. Copy the Installer into the Container
 Download your broker's custom installer (e.g., `tickmill5setup.exe`) to your local PC, upload it to your host VM, and copy it directly into the running container:
 ```bash
-docker cp ~/tickmill5setup.exe mt5-project-mt5-container-1:/root/
+docker cp mt5setup.exe mt5-project-mt5-container-1:/root/
 ```
 
 ### 2. Run the Graphical Installer
@@ -180,3 +180,7 @@ Running multiple graphical applications inside a single container can be memory 
 
 1. **Market Watch Cleanup:** Inside each MT5 terminal, right-click inside the Market Watch window and select **Hide All**. Only show the exact symbol you are actively trading. This reduces background CPU ticks by up to 70%.
 2. **Minimize Charts:** Go to *Tools -> Options -> Charts* and change **Max bars in chart** to `5000`. Keep terminal windows minimized inside the VNC workspace when not manually inspecting them to bypass the Wine X11 drawing loop entirely.
+
+
+docker compose exec mt5-container cat /var/log/mt5_cluster.err
+docker compose exec mt5-container cat /var/log/mt5_cluster.log

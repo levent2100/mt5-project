@@ -24,25 +24,23 @@ if [ ! -d "/config/.wine/drive_c/Python310" ]; then
     wine /config/.wine/drive_c/Python310/python.exe get-pip.py
     rm get-pip.py
     
-    # Install Python Packages
+    # Install Python Packages (MetaTrader5, numpy, and mt5linux)
     wine /config/.wine/drive_c/Python310/python.exe -m pip install --upgrade pip
     wine /config/.wine/drive_c/Python310/python.exe -m pip install MetaTrader5 mt5linux
     cd /root
 fi
 
 echo "1. Starting Virtual Framebuffer (Xvfb)..."
-Xvfb :1 -screen 0 1280x1024x24 &
+Xvfb :1 -screen 0 1024x768x24 &
 sleep 2
 
 echo "2. Starting Openbox Window Manager..."
 openbox-session &
 sleep 1
 
-# FIX: Start the lightweight taskbar panel
 echo "2b. Starting Tint2 Taskbar Panel..."
 tint2 &
 sleep 1
-
 
 echo "3. Starting VNC Server..."
 if [ -n "$VNC_PASSWD" ]; then
@@ -65,89 +63,129 @@ sleep 2
 echo "5. Starting MT5 instances..."
 
 # Instance 1 (Active by default)
-wine "/config/.wine/drive_c/Program Files/MetaTrader 5_1/terminal64.exe" /portable &
-sleep 3
+if [ -f "/config/.wine/drive_c/Program Files/MetaTrader 5_1/terminal64.exe" ]; then
+    wine "/config/.wine/drive_c/Program Files/MetaTrader 5_1/terminal64.exe" /portable &
+    sleep 3
+fi
 
 # Instance 2
-# wine "/config/.wine/drive_c/Program Files/MetaTrader 5_2/terminal64.exe" /portable &
-# sleep 3
+# if [ -f "/config/.wine/drive_c/Program Files/MetaTrader 5_2/terminal64.exe" ]; then
+#     wine "/config/.wine/drive_c/Program Files/MetaTrader 5_2/terminal64.exe" /portable &
+#     sleep 3
+# fi
 
 # Instance 3
-# wine "/config/.wine/drive_c/Program Files/MetaTrader 5_3/terminal64.exe" /portable &
-# sleep 3
+# if [ -f "/config/.wine/drive_c/Program Files/MetaTrader 5_3/terminal64.exe" ]; then
+#     wine "/config/.wine/drive_c/Program Files/MetaTrader 5_3/terminal64.exe" /portable &
+#     sleep 3
+# fi
 
 # Instance 4
-# wine "/config/.wine/drive_c/Program Files/MetaTrader 5_4/terminal64.exe" /portable &
-# sleep 3
+# if [ -f "/config/.wine/drive_c/Program Files/MetaTrader 5_4/terminal64.exe" ]; then
+#     wine "/config/.wine/drive_c/Program Files/MetaTrader 5_4/terminal64.exe" /portable &
+#     sleep 3
+# fi
 
 # Instance 5
-# wine "/config/.wine/drive_c/Program Files/MetaTrader 5_5/terminal64.exe" /portable &
-# sleep 3
+# if [ -f "/config/.wine/drive_c/Program Files/MetaTrader 5_5/terminal64.exe" ]; then
+#     wine "/config/.wine/drive_c/Program Files/MetaTrader 5_5/terminal64.exe" /portable &
+#     sleep 3
+# fi
 
 # Instance 6
-# wine "/config/.wine/drive_c/Program Files/MetaTrader 5_6/terminal64.exe" /portable &
-# sleep 3
+# if [ -f "/config/.wine/drive_c/Program Files/MetaTrader 5_6/terminal64.exe" ]; then
+#     wine "/config/.wine/drive_c/Program Files/MetaTrader 5_6/terminal64.exe" /portable &
+#     sleep 3
+# fi
 
 # Instance 7
-# wine "/config/.wine/drive_c/Program Files/MetaTrader 5_7/terminal64.exe" /portable &
-# sleep 3
+# if [ -f "/config/.wine/drive_c/Program Files/MetaTrader 5_7/terminal64.exe" ]; then
+#     wine "/config/.wine/drive_c/Program Files/MetaTrader 5_7/terminal64.exe" /portable &
+#     sleep 3
+# fi
 
 # Instance 8
-# wine "/config/.wine/drive_c/Program Files/MetaTrader 5_8/terminal64.exe" /portable &
-# sleep 3
+# if [ -f "/config/.wine/drive_c/Program Files/MetaTrader 5_8/terminal64.exe" ]; then
+#     wine "/config/.wine/drive_c/Program Files/MetaTrader 5_8/terminal64.exe" /portable &
+#     sleep 3
+# fi
 
 # Instance 9
-# wine "/config/.wine/drive_c/Program Files/MetaTrader 5_9/terminal64.exe" /portable &
-# sleep 3
+# if [ -f "/config/.wine/drive_c/Program Files/MetaTrader 5_9/terminal64.exe" ]; then
+#     wine "/config/.wine/drive_c/Program Files/MetaTrader 5_9/terminal64.exe" /portable &
+#     sleep 3
+# fi
 
 # Instance 10
-# wine "/config/.wine/drive_c/Program Files/MetaTrader 5_10/terminal64.exe" /portable &
-# sleep 3
+# if [ -f "/config/.wine/drive_c/Program Files/MetaTrader 5_10/terminal64.exe" ]; then
+#     wine "/config/.wine/drive_c/Program Files/MetaTrader 5_10/terminal64.exe" /portable &
+#     sleep 3
+# fi
 
 
 # =====================================================================
-# 6. STARTING PYTHON BRIDGES (Uncomment corresponding ports)
+# 6. STARTING CUSTOM HTTP BRIDGES (Uncomment corresponding files)
 # =====================================================================
-echo "6. Starting Python Bridges..."
+echo "6. Starting Custom HTTP Bridges..."
 
-# Bridge 1 - Port 18812 (Active by default)
-wine /config/.wine/drive_c/Python310/python.exe -m mt5linux --host 0.0.0.0 --port 18812 &
-sleep 1
+# Bridge 1 - Port 58809 (Active by default)
+if [ -f "/root/scripts/mt5_http_bridge1.py" ]; then
+    wine /config/.wine/drive_c/Python310/python.exe /root/scripts/mt5_http_bridge1.py &
+    sleep 1
+fi
 
-# Bridge 2 - Port 18813
-# wine /config/.wine/drive_c/Python310/python.exe -m mt5linux --host 0.0.0.0 --port 18813 &
-# sleep 1
+# Bridge 2 - Port 58810
+# if [ -f "/root/scripts/mt5_http_bridge2.py" ]; then
+#     wine /config/.wine/drive_c/Python310/python.exe /root/scripts/mt5_http_bridge2.py &
+#     sleep 1
+# fi
 
-# Bridge 3 - Port 18814
-# wine /config/.wine/drive_c/Python310/python.exe -m mt5linux --host 0.0.0.0 --port 18814 &
-# sleep 1
+# Bridge 3 - Port 58811
+# if [ -f "/root/scripts/mt5_http_bridge3.py" ]; then
+#     wine /config/.wine/drive_c/Python310/python.exe /root/scripts/mt5_http_bridge3.py &
+#     sleep 1
+# fi
 
-# Bridge 4 - Port 18815
-# wine /config/.wine/drive_c/Python310/python.exe -m mt5linux --host 0.0.0.0 --port 18815 &
-# sleep 1
+# Bridge 4 - Port 58812
+# if [ -f "/root/scripts/mt5_http_bridge4.py" ]; then
+#     wine /config/.wine/drive_c/Python310/python.exe /root/scripts/mt5_http_bridge4.py &
+#     sleep 1
+# fi
 
-# Bridge 5 - Port 18816
-# wine /config/.wine/drive_c/Python310/python.exe -m mt5linux --host 0.0.0.0 --port 18816 &
-# sleep 1
+# Bridge 5 - Port 58813
+# if [ -f "/root/scripts/mt5_http_bridge5.py" ]; then
+#     wine /config/.wine/drive_c/Python310/python.exe /root/scripts/mt5_http_bridge5.py &
+#     sleep 1
+# fi
 
-# Bridge 6 - Port 18817
-# wine /config/.wine/drive_c/Python310/python.exe -m mt5linux --host 0.0.0.0 --port 18817 &
-# sleep 1
+# Bridge 6 - Port 58814
+# if [ -f "/root/scripts/mt5_http_bridge6.py" ]; then
+#     wine /config/.wine/drive_c/Python310/python.exe /root/scripts/mt5_http_bridge6.py &
+#     sleep 1
+# fi
 
-# Bridge 7 - Port 18818
-# wine /config/.wine/drive_c/Python310/python.exe -m mt5linux --host 0.0.0.0 --port 18818 &
-# sleep 1
+# Bridge 7 - Port 58815
+# if [ -f "/root/scripts/mt5_http_bridge7.py" ]; then
+#     wine /config/.wine/drive_c/Python310/python.exe /root/scripts/mt5_http_bridge7.py &
+#     sleep 1
+# fi
 
-# Bridge 8 - Port 18819
-# wine /config/.wine/drive_c/Python310/python.exe -m mt5linux --host 0.0.0.0 --port 18819 &
-# sleep 1
+# Bridge 8 - Port 58816
+# if [ -f "/root/scripts/mt5_http_bridge8.py" ]; then
+#     wine /config/.wine/drive_c/Python310/python.exe /root/scripts/mt5_http_bridge8.py &
+#     sleep 1
+# fi
 
-# Bridge 9 - Port 18820
-# wine /config/.wine/drive_c/Python310/python.exe -m mt5linux --host 0.0.0.0 --port 18820 &
-# sleep 1
+# Bridge 9 - Port 58817
+# if [ -f "/root/scripts/mt5_http_bridge9.py" ]; then
+#     wine /config/.wine/drive_c/Python310/python.exe /root/scripts/mt5_http_bridge9.py &
+#     sleep 1
+# fi
 
-# Bridge 10 - Port 18821
-# wine /config/.wine/drive_c/Python310/python.exe -m mt5linux --host 0.0.0.0 --port 18821 &
-# sleep 1
+# Bridge 10 - Port 58818
+# if [ -f "/root/scripts/mt5_http_bridge10.py" ]; then
+#     wine /config/.wine/drive_c/Python310/python.exe /root/scripts/mt5_http_bridge10.py &
+#     sleep 1
+# fi
 
 wait
