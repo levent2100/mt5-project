@@ -1,0 +1,14 @@
+version: "3.8"
+
+services:
+  mt5-container:
+    build:
+      context: .
+      dockerfile: mt5/Dockerfile
+    privileged: true # <--- CRITICAL: Grants full system call access at runtime
+    environment:
+      - VNC_PASSWD=MySafeTradingPassword123!
+    ports:
+      - "127.0.0.1:18812-18821:18812-18821"  # Python RPC Ports
+      - "127.0.0.1:8080:8080"                # Secure noVNC Port
+    restart: always
