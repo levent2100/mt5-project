@@ -24,9 +24,9 @@ if [ ! -d "/config/.wine/drive_c/Python310" ]; then
     wine /config/.wine/drive_c/Python310/python.exe get-pip.py
     rm get-pip.py
     
-    # Install Python Packages (MetaTrader5, numpy, and mt5linux)
+    # Install Python Packages (MetaTrader5, numpy, mt5linux, and TA-Lib)
     wine /config/.wine/drive_c/Python310/python.exe -m pip install --upgrade pip
-    wine /config/.wine/drive_c/Python310/python.exe -m pip install MetaTrader5 mt5linux
+    wine /config/.wine/drive_c/Python310/python.exe -m pip install MetaTrader5 mt5linux TA-Lib
     cd /root
 fi
 
