@@ -718,6 +718,14 @@ export default function Dashboard() {
     return `${sign}${val.toFixed(2)}$`;
   };
 
+  const formatPnlWithPerc = (val: number | undefined, balance: number | undefined) => {
+    if (val === undefined || isNaN(val)) return '0.00% (0.00$)';
+    const percent = (balance && balance > 0) ? (val / balance) * 100 : 0;
+    const sign = val > 0 ? '+' : '';
+    const pSign = percent > 0 ? '+' : '';
+    return `%${pSign}${percent.toFixed(2)} (${sign}${val.toFixed(2)}$)`;
+  };
+
   return (
     <div className={`flex flex-col min-h-screen transition-colors duration-200 ${
       theme === 'dark' ? 'dark bg-[#0A0A0A] text-neutral-100' : 'bg-[#FAFAFA] text-neutral-900'
@@ -790,7 +798,7 @@ export default function Dashboard() {
             <span className={`font-mono font-bold ${
               (referenceAccount?.realizedPNL || 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
             }`}>
-              {formatPnl(referenceAccount?.realizedPNL)}
+              {formatPnlWithPerc(referenceAccount?.realizedPNL, referenceAccount?.cash_value)}
             </span>
           </div>
 
@@ -801,7 +809,7 @@ export default function Dashboard() {
             <span className={`font-mono font-bold transition-all duration-300 ${refPnlPulse ? 'animate-flicker' : ''} ${
               (referenceAccount?.unrealizedPNL || 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
             }`}>
-              {formatPnl(referenceAccount?.unrealizedPNL)}
+              {formatPnlWithPerc(referenceAccount?.unrealizedPNL, referenceAccount?.cash_value)}
             </span>
           </div>
 
@@ -1551,7 +1559,7 @@ export default function Dashboard() {
                         <div className="flex justify-between items-center border-t pt-1.5 border-neutral-900/40">
                           <span className={`${theme === 'dark' ? 'text-neutral-500' : 'text-neutral-450'}`}>Unrealized PnL:</span>
                           <span className={`font-mono font-extrabold text-xs ${(activePosition.pnl || 0) >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                            {formatPnl(activePosition.pnl)}
+                            {formatPnlWithPerc(activePosition.pnl, referenceAccount?.cash_value)}
                           </span>
                         </div>
                       </div>
@@ -1805,7 +1813,7 @@ export default function Dashboard() {
                       } ${
                         activePositionsTotalPnL >= 0 ? 'text-emerald-500' : 'text-rose-500'
                       }`}>
-                        {formatPnl(activePositionsTotalPnL)}
+                        {formatPnlWithPerc(activePositionsTotalPnL, referenceAccount?.cash_value)}
                       </span>
                     </div>
                   </div>
@@ -1852,7 +1860,7 @@ export default function Dashboard() {
                               <td className={`py-2.5 text-right font-mono font-semibold ${
                                 (pos.pnl || 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
                               }`}>
-                                {formatPnl(pos.pnl)}
+                                {formatPnlWithPerc(pos.pnl, referenceAccount?.cash_value)}
                               </td>
                             </tr>
                           ))
@@ -2082,14 +2090,14 @@ export default function Dashboard() {
                               <td className={`py-2.5 px-3 text-right font-mono text-xs font-semibold ${
                                 (acc.realizedPNL || 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
                               }`}>
-                                {formatPnl(acc.realizedPNL)}
+                                {formatPnlWithPerc(acc.realizedPNL, acc.cash_value)}
                               </td>
                               <td className={`py-2.5 px-3 text-right font-mono text-xs font-semibold transition-all duration-300 ${
                                 farmPnlPulse[acc.id] ? 'animate-flicker' : ''
                               } ${
                                 pnlVal >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
                               }`}>
-                                {formatPnl(acc.unrealizedPNL)}
+                                {formatPnlWithPerc(acc.unrealizedPNL, acc.cash_value)}
                               </td>
                             </tr>
                           );

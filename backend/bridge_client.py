@@ -5,7 +5,7 @@ from typing import Dict, Any, List, Optional
 logger = logging.getLogger("backend.bridge")
 
 class BridgeClient:
-    def __init__(self, base_url: str, timeout: float = 8.0):
+    def __init__(self, base_url: str, timeout: float = 1.0):
         # Ensure base_url has no trailing slash
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout

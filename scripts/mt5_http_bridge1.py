@@ -122,6 +122,20 @@ mt5_manager = MT5ConnectionManager()
 # ==============================================================================
 # --- Helper & Calculation Functions ---
 # ==============================================================================
+def ensure_symbol_selected(symbol_name):
+    """ Ensures a symbol is visible in the Market Watch so we can retrieve ticks/info. """
+    info = mt5.symbol_info(symbol_name)
+    if not info:
+        if mt5.symbol_select(symbol_name, True):
+            time.sleep(0.05)
+            return mt5.symbol_info(symbol_name)
+        return None
+    if not info.visible:
+        if mt5.symbol_select(symbol_name, True):
+            time.sleep(0.05)
+            return mt5.symbol_info(symbol_name)
+    return info
+
 def round_price(price, digits):
     """ Rounds a price to the correct number of decimal places for a symbol. """
     return float(Decimal(str(price)).quantize(Decimal('1e-' + str(digits)), rounding=ROUND_HALF_UP))
@@ -345,7 +359,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 instrument, o_type, direction = trade.get("instrument"), trade.get("ordertype", "").lower(), trade.get("direction", "").lower()
                 if not all([instrument, o_type, direction]): result["error"] = "Missing required fields."; results.append(result); overall_success = False; continue
                 
-                symbol_info = mt5.symbol_info(instrument) or (mt5.symbol_select(instrument, True) and time.sleep(0.1) and mt5.symbol_info(instrument))
+                symbol_info = ensure_symbol_selected(instrument)
                 if not symbol_info: result["error"] = f"Instrument '{instrument}' not found."; results.append(result); overall_success = False; continue
                 
                 tick = mt5.symbol_info_tick(instrument)
@@ -511,13 +525,15 @@ class RequestHandler(BaseHTTPRequestHandler):
             
             spreads, errors = {}, []
             for inst in instruments:
-                symbol_info = mt5.symbol_info(inst) or (mt5.symbol_select(inst, True) and time.sleep(0.1) and mt5.symbol_info(inst))
+                if not inst or inst == "N/A":
+                    continue
+                symbol_info = ensure_symbol_selected(inst)
                 if not symbol_info: errors.append({inst: "Symbol not found."}); spreads[inst] = None; continue
                 tick = mt5.symbol_info_tick(inst)
                 if not tick or tick.ask == 0.0 or tick.bid == 0.0: errors.append({inst: "No valid tick data."}); spreads[inst] = None; continue
                 spreads[inst] = round(tick.ask - tick.bid, symbol_info.digits)
             
-            final_response = {"success": not errors, "accounts": [{"account": str(acc_info.login), "spreads": spreads}]}
+            final_response = {"success": True, "accounts": [{"account": str(acc_info.login), "spreads": spreads}]}
             if errors: final_response.update({"message": "Could not retrieve all spreads.", "errors": errors})
             
             self._send_json_response(final_response)
@@ -528,7 +544,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             instrument = data.get("instrument")
             if not instrument: return self._send_error_response("Missing 'instrument' field", 400)
             
-            symbol_info = mt5.symbol_info(instrument) or (mt5.symbol_select(instrument, True) and time.sleep(0.1) and mt5.symbol_info(instrument))
+            symbol_info = ensure_symbol_selected(instrument)
             if not symbol_info: return self._send_error_response(f"Instrument '{instrument}' not found.", 404)
             
             atr = calculate_atr(instrument)

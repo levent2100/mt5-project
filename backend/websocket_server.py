@@ -187,7 +187,7 @@ async def poll_reference_account():
                 await asyncio.sleep(4.0)
                 continue
 
-            client = BridgeClient(ip_port, timeout=4.0)
+            client = BridgeClient(ip_port, timeout=1.0)
             res = await client.get_account_status()
 
             if res.get("success", False):
@@ -204,7 +204,7 @@ async def poll_reference_account():
         except Exception as e:
             logger.error(f"Error in poll_reference_account loop: {e}")
         
-        await asyncio.sleep(2.0)
+        await asyncio.sleep(1.0)
 
 async def poll_multi_accounts():
     """Polls all active/configured farm accounts concurrently and broadcasts updates every 3 seconds."""
@@ -221,7 +221,7 @@ async def poll_multi_accounts():
                 ip_port = acc.get("ip_port")
                 is_enabled = acc.get("trade_enabled", False)
                 if ip_port and is_enabled:
-                    client = BridgeClient(ip_port, timeout=3.5)
+                    client = BridgeClient(ip_port, timeout=1.0)
                     tasks.append(client.get_account_status())
                 else:
                     async def dummy(err_msg: str):
@@ -255,7 +255,7 @@ async def poll_multi_accounts():
         except Exception as e:
             logger.error(f"Error in poll_multi_accounts loop: {e}")
 
-        await asyncio.sleep(3.0)
+        await asyncio.sleep(1.0)
 
 async def poll_spreads():
     """Polls live spreads for all active/configured accounts concurrently and broadcasts updates every 2 seconds."""
@@ -273,12 +273,14 @@ async def poll_spreads():
                     ip_port = acc.get("ip_port")
                     is_enabled = acc.get("trade_enabled", False)
                     if ip_port and is_enabled:
-                        client = BridgeClient(ip_port, timeout=3.0)
+                        client = BridgeClient(ip_port, timeout=1.0)
                         # We need to map the global symbols to the broker specific symbols
                         name_conv = acc.get("NameConversions", {})
                         broker_symbols = []
                         for sym in symbols:
-                            broker_symbols.append(name_conv.get(sym, sym))
+                            b_sym = name_conv.get(sym, sym)
+                            if b_sym and b_sym != "N/A":
+                                broker_symbols.append(b_sym)
 
                         tasks.append(client.get_spreads(broker_symbols))
                         active_accounts.append(acc)
@@ -326,7 +328,7 @@ async def poll_spreads():
         except Exception as e:
             logger.error(f"Error in poll_spreads loop: {e}")
         
-        await asyncio.sleep(2.0)
+        await asyncio.sleep(1.0)
 
 # --- WebSocket Route Entry ---
 @router.websocket("/ws")
@@ -405,7 +407,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     ref_config = next((acc for acc in all_accs if acc.get("name") == ref_name), None)
 
                     if ref_config and ref_config.get("ip_port"):
-                        client = BridgeClient(ref_config["ip_port"], timeout=5.0)
+                        client = BridgeClient(ref_config["ip_port"], timeout=1.0)
                         res = await client.get_account_status()
                         if res.get("success"):
                             ui_acc = map_bridge_to_ui_account(ref_config, res["account_data"], "Connected")

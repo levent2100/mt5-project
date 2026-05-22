@@ -20,6 +20,7 @@ export default function MicroPanel() {
   const [atrPips, setAtrPips] = useState<number | null>(null);
   const [isFetchingAtr, setIsFetchingAtr] = useState<boolean>(false);
   const [totalPnL, setTotalPnL] = useState<number | null>(null);
+  const [cashValue, setCashValue] = useState<number | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [message, setMessage] = useState<{ text: string; type: "success" | "danger" | "info" | "warning" | null }>({ text: "", type: null });
@@ -68,6 +69,7 @@ export default function MicroPanel() {
           .then(data => {
             if (data?.account) {
               setTotalPnL(data.account.unrealizedPNL);
+              setCashValue(data.account.cash_value);
               setLastUpdated(new Date().toLocaleTimeString());
             }
           })
@@ -109,6 +111,8 @@ export default function MicroPanel() {
               case "account_update":
                 if (payload.data?.account) {
                   const currentPnL = payload.data.account.unrealizedPNL;
+                  const currentCash = payload.data.account.cash_value;
+                  setCashValue(currentCash);
                   setTotalPnL(prev => {
                     if (prev !== null && prev !== currentPnL) {
                       setPnlPulse(currentPnL > prev ? "up" : "down");
@@ -376,7 +380,15 @@ export default function MicroPanel() {
     }
   };
 
-  const formattedPnL = totalPnL !== null ? totalPnL.toFixed(2) : "0.00";
+  const formatPnlWithPerc = (val: number | null, balance: number | null) => {
+    if (val === null || isNaN(val)) return '0.00% (0.00$)';
+    const percent = (balance && balance > 0) ? (val / balance) * 100 : 0;
+    const sign = val > 0 ? '+' : '';
+    const pSign = percent > 0 ? '+' : '';
+    return `%${pSign}${percent.toFixed(2)} (${sign}${val.toFixed(2)}$)`;
+  };
+
+  const formattedPnL = totalPnL !== null ? formatPnlWithPerc(totalPnL, cashValue) : "0.00% (0.00$)";
   const pnlClass = totalPnL !== null && totalPnL > 0 
     ? "text-emerald-600 bg-emerald-50 border-emerald-200" 
     : totalPnL !== null && totalPnL < 0 
@@ -439,11 +451,11 @@ export default function MicroPanel() {
 
             {/* PNL Badge */}
             <div 
-              className={`flex items-center gap-1.5 px-3 py-1 font-mono text-xs font-bold border rounded-lg transition-all duration-300 ${pnlClass} ${
+              className={`flex items-center gap-1 px-2 py-0.5 font-mono text-[10.5px] font-bold border rounded-lg whitespace-nowrap transition-all duration-300 ${pnlClass} ${
                 pnlPulse === "up" ? "scale-105 shadow-md shadow-emerald-500/10" : pnlPulse === "down" ? "scale-95 shadow-md shadow-rose-500/10" : ""
               }`}
             >
-              <Activity className="w-3.5 h-3.5" />
+              <Activity className="w-3 h-3 flex-shrink-0" />
               <span>{formattedPnL}</span>
             </div>
           </div>
