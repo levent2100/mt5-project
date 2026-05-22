@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-Account Summary Table</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet"
+        integrity="sha384-T3c6CoIi6uLrA9TneNEoa7RxnatzjcDSCmG1MXxSR1GAsXEV/Dwwykc2MPK8M2HN" crossorigin="anonymous">
+    <!-- No need for icon library for this version -->
+    <style>
+        body {
+            padding-top: 1rem;
+            background-color: #f8f9fa;
+        }
+
+        /* Connection Status Styles */
+        #ws-status .badge { vertical-align: middle; }
+        .status-connecting { background-color: #ffc107; color: #000; }
+        .status-connected-badge { background-color: #198754; }
+        .status-disconnected { background-color: #6c757d; }
+        .status-error { background-color: #dc3545; }
+
+        /* Table Styles */
+        .table-wrapper {
+            margin-top: 1.5rem;
+        }
+        .table thead th {
+            background-color: #e9ecef;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        .table td, .table th {
+            white-space: nowrap;
+            vertical-align: middle;
+            font-size: 0.9rem;
+            text-align: right;
+        }
+        .table th:first-child, .table td:first-child {
+            text-align: left;
+            font-weight: bold;
+        }
+        .table .status-col, .table .type-col, .table .enabled-col {
+            text-align: center;
+        }
+
+        /* PNL and Status Coloring */
+        .pnl-positive { color: #198754; font-weight: 500; }
+        .pnl-negative { color: #dc3545; font-weight: 500; }
+
+        /* Flicker Animation */
+        @keyframes flicker {
+            0%, 100% { background-color: inherit; }
+            50% { background-color: #fff3cd; } /* Light yellow flash */
+        }
+        .flicker {
+            animation: flicker 0.6s ease-in-out;
+        }
+
+        /* MODIFIED: Style for rows that have open positions */
+        .table-row-has-position > td {
+            background-color: #d1e7dd; /* Light green (Bootstrap's success background) */
+        }
+        /* MODIFIED: Custom hover effect for the highlighted rows */
+        .table-hover > tbody > .table-row-has-position:hover > td {
+            background-color: #b9d7c3; /* A slightly darker green for hover */
+        }
+
+    </style>
+</head>
+
+<body>
+    <div class="container-fluid">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <h1 class="mb-0">Account Summary</h1>
+            <div class="text-end d-flex align-items-center">
+                <span id="ws-status" class="me-3"><span class="badge status-connecting">Connecting...</span></span>
+                <small class="text-muted">Last Update: <span id="last-updated" class="fw-bold">Never</span></small>
+            </div>
+        </div>
+
+        <div class="table-wrapper" id="summary-table-wrapper">
+            <!-- Loading Indicator -->
+            <div class="text-center" id="loading-indicator">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p class="mt-2">Waiting for WebSocket connection...</p>
+            </div>
+            <!-- Table will be generated here by JavaScript -->
+        </div>
+    </div>
+
+    <!-- Bootstrap JS Bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"
+        integrity="sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL"
+        crossorigin="anonymous"></script>
+
+    <script>
+        // --- DOM Elements ---
+        const tableWrapper = document.getElementById('summary-table-wrapper');
+        const lastUpdatedSpan = document.getElementById('last-updated');
+        const wsStatusSpan = document.getElementById('ws-status');
+        let loadingIndicator = document.getElementById('loading-indicator');
+
+        // --- State & Config ---
+        const WS_URL = 'ws://localhost:9999';
+        const RECONNECT_DELAY_MS = 5000;
+        let websocket = null;
+        let previousData = {}; // Stores previous values for flicker effect
+        let reconnectTimer = null;
+
+        // --- Utility Functions ---
+        function addLog(message, source = "FE") { console.log(`[${new Date().toLocaleTimeString()}][${source}] ${message}`); }
+        function formatCurrency(value) { return value != null ? value.toFixed(2) + '$' : 'N/A'; }
+        function formatPercent(value) { return value != null ? value.toFixed(2) + '%' : 'N/A'; }
+        function getPnlClass(value) { return value == null || value === 0 ? '' : value > 0 ? 'pnl-positive' : 'pnl-negative'; }
+        function generateRequestId() { return crypto.randomUUID(); }
+        const nfObject = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+        // --- UI Update Functions ---
+        function updateWsStatus(status, message) {
+            let badgeClass = 'status-disconnected';
+            let statusText = message || 'Disconnected';
+
+            switch (status) {
+                case 'connecting': badgeClass = 'status-connecting'; statusText = 'Connecting...'; break;
+                case 'connected': badgeClass = 'status-connected-badge'; statusText = 'Connected'; break;
+                case 'error': badgeClass = 'status-error'; statusText = 'Error'; break;
+                default: badgeClass = 'status-disconnected'; statusText = 'Disconnected'; break;
+            }
+            wsStatusSpan.innerHTML = `<span class="badge ${badgeClass}">${statusText}</span>`;
+        }
+        
+        function createTableStructure() {
+            if (loadingIndicator) {
+                loadingIndicator.remove();
+                loadingIndicator = null;
+            }
+            
+            // MODIFIED: Removed the 'Pos' column header
+            const headerHtml = `
+                <tr>
+                    <th>Account Name</th>
+                    <th>Cash Value</th>
+                    <th>Realized ($)</th>
+                    <th>Realized (%)</th>
+                    <th>Unrealized ($)</th>
+                    <th>Unrealized (%)</th>
+                    <th>Last Updated</th>
+                    <th class="type-col">Type</th>
+                    <th class="status-col">Status</th>
+                    <th class="enabled-col">Enabled</th>
+                </tr>`;
+
+            tableWrapper.innerHTML = `
+                <table class="table table-bordered table-hover table-sm">
+                    <thead id="summary-table-head">${headerHtml}</thead>
+                    <tbody id="summary-table-body"></tbody>
+                </table>`;
+        }
+
+        function processAccountData(accounts) {
+            const tableBody = document.getElementById('summary-table-body');
+            if (!tableBody) return;
+
+            const newPreviousData = {};
+
+            accounts.forEach(account => {
+                const accountId = account.id;
+                if (!accountId) return;
+
+                // --- Calculate values ---
+                const cashValue = account.cash_value || 0;
+                const realizedPNL = account.realizedPNL || 0;
+                const unrealizedPNL = account.unrealizedPNL || 0;
+                const realizedPct = cashValue > 0 ? (realizedPNL / cashValue) * 100 : 0;
+                const unrealizedPct = cashValue > 0 ? (unrealizedPNL / cashValue) * 100 : 0;
+                
+                newPreviousData[accountId] = { cashValue, realizedPNL, unrealizedPNL };
+
+                // --- Find or create row ---
+                let row = document.getElementById(`tr-${accountId}`);
+                if (!row) {
+                    row = tableBody.insertRow();
+                    row.id = `tr-${accountId}`;
+                    // MODIFIED: Removed the cell for the position status
+                    row.innerHTML = `
+                        <td class="account-name">${account.displayName || accountId}</td>
+                        <td data-field="cashValue"></td>
+                        <td data-field="realizedPNL"></td>
+                        <td data-field="realizedPct"></td>
+                        <td data-field="unrealizedPNL"></td>
+                        <td data-field="unrealizedPct"></td>
+                        <td data-field="lastUpdated"></td>
+                        <td class="type-col" data-field="type"></td>
+                        <td class="status-col" data-field="status"></td>
+                        <td class="enabled-col" data-field="enabled"></td>
+                    `;
+                }
+                
+                const prev = previousData[accountId] || {};
+
+                // MODIFIED: Determine if the row should be highlighted
+                const hasPositions = account.positions && account.positions.length > 0;
+                row.classList.toggle('table-row-has-position', hasPositions);
+
+                // --- Update Cells ---
+                const updateCell = (field, value, className = '', flicker = false) => {
+                    const cell = row.querySelector(`[data-field="${field}"]`);
+                    // Ensure the base class from the template (e.g., 'type-col') is preserved
+                    const baseClass = cell.className.split(' ').filter(c => c !== 'flicker').join(' ');
+                    cell.textContent = value;
+                    cell.className = `${baseClass} ${className}`; // Append new class
+                    if (flicker) {
+                         cell.classList.add('flicker');
+                         setTimeout(() => cell.classList.remove('flicker'), 600);
+                    }
+                };
+                
+                updateCell('cashValue', nfObject.format(cashValue) + '$', '', cashValue !== prev.cashValue);
+                updateCell('realizedPNL', formatCurrency(realizedPNL), getPnlClass(realizedPNL), realizedPNL !== prev.realizedPNL);
+                updateCell('realizedPct', formatPercent(realizedPct), getPnlClass(realizedPct), realizedPNL !== prev.realizedPNL);
+                updateCell('unrealizedPNL', formatCurrency(unrealizedPNL), getPnlClass(unrealizedPNL), unrealizedPNL !== prev.unrealizedPNL);
+                updateCell('unrealizedPct', formatPercent(unrealizedPct), getPnlClass(unrealizedPct), unrealizedPNL !== prev.unrealizedPNL);
+                updateCell('lastUpdated', account.lastUpdated || 'N/A');
+                updateCell('type', account.type || 'N/A'); // No extra class needed, base class is preserved
+                
+                // Status Badge
+                let statusBadgeClass = 'warning';
+                if (account.status === 'Connected') statusBadgeClass = 'success';
+                else if (account.status === 'Error') statusBadgeClass = 'danger';
+                row.querySelector('[data-field="status"]').innerHTML = `<span class="badge bg-${statusBadgeClass}">${account.status || 'Unknown'}</span>`;
+
+                // Enabled Badge
+                let enabledBadgeClass = 'danger';
+                let isEnabled = 'DISABLED';
+                if (account.enabled === true) { enabledBadgeClass = 'success'; isEnabled = 'ENABLED'; }
+                row.querySelector('[data-field="enabled"]').innerHTML = `<span class="badge bg-${enabledBadgeClass}">${isEnabled}</span>`;
+            });
+            
+            previousData = newPreviousData;
+            lastUpdatedSpan.textContent = new Date().toLocaleString();
+        }
+
+        // --- WebSocket Functions (largely same as card view) ---
+        function connectWebSocket() {
+            if (websocket && websocket.readyState === WebSocket.OPEN) return;
+            if (reconnectTimer) clearTimeout(reconnectTimer);
+
+            addLog(`Connecting to ${WS_URL}...`);
+            updateWsStatus('connecting');
+
+            websocket = new WebSocket(WS_URL);
+
+            websocket.onopen = () => {
+                addLog("WebSocket established.");
+                updateWsStatus('connected');
+                createTableStructure();
+
+                sendWebSocketRequest('get_multi_account_status')
+                    .then(data => {
+                        if (data && Array.isArray(data.accounts)) {
+                            processAccountData(data.accounts);
+                        } else { throw new Error("Invalid initial account status structure."); }
+                    })
+                    .catch(error => addLog(`Error getting initial status: ${error}`, "Error"));
+
+                sendWebSocketRequest('subscribe_multi_account')
+                    .catch(err => addLog(`Subscription failed: ${err}`, "Error"));
+            };
+
+            websocket.onmessage = (event) => {
+                try {
+                    const message = JSON.parse(event.data);
+                    if (message.type === 'multi_account_update' && message.data && Array.isArray(message.data.accounts)) {
+                        processAccountData(message.data.accounts);
+                    }
+                } catch (error) { addLog(`Error processing message: ${error}`, "Error"); }
+            };
+
+            websocket.onerror = (event) => {
+                addLog(`WebSocket Error.`, "Error");
+                updateWsStatus('error', 'Connection Error');
+            };
+
+            websocket.onclose = () => {
+                addLog(`WebSocket closed.`);
+                updateWsStatus('disconnected');
+                previousData = {};
+                if (!reconnectTimer) {
+                    reconnectTimer = setTimeout(connectWebSocket, RECONNECT_DELAY_MS);
+                }
+            };
+        }
+
+        function sendWebSocketRequest(command, payload = {}) {
+            return new Promise((resolve, reject) => {
+                if (!websocket || websocket.readyState !== WebSocket.OPEN) {
+                    return reject('WebSocket not connected.');
+                }
+                const requestId = generateRequestId();
+                const message = { receiver: "proplink", data: { requestId, command, payload } };
+                
+                const tempListener = (event) => {
+                    const response = JSON.parse(event.data);
+                    if (response.requestId === requestId) {
+                        websocket.removeEventListener('message', tempListener);
+                        response.status === 'ok' ? resolve(response.data) : reject(response.error || 'Request failed');
+                    }
+                };
+                websocket.addEventListener('message', tempListener);
+                
+                setTimeout(() => {
+                    websocket.removeEventListener('message', tempListener);
+                    reject('Request timed out');
+                }, 5000);
+
+                websocket.send(JSON.stringify(message));
+            });
+        }
+
+        // --- Initial Load ---
+        document.addEventListener('DOMContentLoaded', connectWebSocket);
+    </script>
+</body>
+
+</html>

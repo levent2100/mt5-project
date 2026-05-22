@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Spread Monitor</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet"
+        integrity="sha384-T3c6CoIi6uLrA9TneNEoa7RxnatzjcDSCmG1MXxSR1GAsXEV/Dwwykc2MPK8M2HN" crossorigin="anonymous">
+    <style>
+        body {
+            padding-top: 1rem;
+            background-color: #f8f9fa;
+        }
+
+        /* Using container-fluid in HTML for full width */
+
+        /* Connection Status Styles */
+        #ws-status .badge { vertical-align: middle; }
+        .status-connecting { background-color: #ffc107; color: #000;} /* Orange */
+        .status-connected { background-color: #198754; } /* Green */
+        .status-disconnected { background-color: #6c757d;} /* Grey */
+        .status-error { background-color: #dc3545;} /* Red */
+
+        /* Table Styles */
+        #spreads-table-wrapper { /* New wrapper to replace .table-responsive */
+            margin-top: 1.5rem;
+        }
+        .table thead th {
+            background-color: #e9ecef;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        .table td, .table th {
+            text-align: center;
+            vertical-align: middle;
+            font-size: 0.9rem;
+            /* min-width removed to allow columns to shrink */
+            white-space: nowrap; /* Prevent symbol names from wrapping */
+        }
+        /* First column styling, sticky position removed */
+        .table th:first-child, .table td:first-child {
+            text-align: left;
+            font-weight: bold;
+            background-color: #f8f9fa; /* Match body background */
+        }
+
+        /* Spread Coloring */
+        .spread-low { color: #198754; font-weight: 500; } /* Green */
+        .spread-medium { color: #b08900; font-weight: 500; } /* Dark Yellow */
+        .spread-high { color: #dc3545; font-weight: 500; } /* Red */
+
+        /* Flicker Animation */
+        @keyframes flicker {
+            0%, 100% { background-color: inherit; }
+            50% { background-color: #fff3cd; } /* Light yellow flash */
+        }
+        .flicker {
+            animation: flicker 0.6s ease-in-out;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container-fluid"> <!-- MODIFIED: Changed to container-fluid for full width -->
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <h1 class="mb-0">Live Spread Monitor</h1>
+            <div class="text-end d-flex align-items-center">
+                <span id="ws-status" class="me-3"><span class="badge status-connecting">Connecting...</span></span>
+                <small class="text-muted">Last Update: <span id="last-updated" class="fw-bold">Never</span></small>
+            </div>
+        </div>
+
+        <div id="alert-container"></div>
+
+        <!-- MODIFIED: Removed .table-responsive class to allow table to use full width -->
+        <div id="spreads-table-wrapper">
+            <!-- Loading Indicator -->
+            <div class="text-center" id="loading-indicator">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p class="mt-2">Waiting for WebSocket connection...</p>
+            </div>
+            <!-- Table will be generated here by JavaScript -->
+        </div>
+    </div>
+
+    <!-- Bootstrap JS Bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"
+        integrity="sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL"
+        crossorigin="anonymous"></script>
+
+    <script>
+        // --- DOM Elements ---
+        const tableWrapper = document.getElementById('spreads-table-wrapper'); // MODIFIED: Changed variable name
+        const lastUpdatedSpan = document.getElementById('last-updated');
+        const wsStatusSpan = document.getElementById('ws-status');
+        let loadingIndicator = document.getElementById('loading-indicator');
+
+        // --- State & Config ---
+        const WS_URL = 'ws://localhost:9999';
+        const RECONNECT_DELAY_MS = 5000;
+        let websocket = null;
+        let globalSymbols = []; // Will be populated on connect
+        let previousData = {}; // Stores previous pip values for flicker { accountId: { symbol: pipValue } }
+        let reconnectTimer = null;
+
+        // --- Utility Functions ---
+        function addLog(message, source = "FE") {
+            const ts = new Date().toLocaleTimeString();
+            console.log(`[${ts}][${source}] ${message}`);
+        }
+
+        function getSpreadClass(pipValue) {
+            if (pipValue === null || isNaN(pipValue)) return '';
+            if (pipValue <= 1.5) return 'spread-low';
+            if (pipValue <= 3.0) return 'spread-medium';
+            return 'spread-high';
+        }
+
+        function generateRequestId() {
+            return crypto.randomUUID();
+        }
+
+        // --- UI Update Functions ---
+        function updateWsStatus(status, message) {
+            let badgeClass = 'status-disconnected';
+            let statusText = message || 'Disconnected';
+
+            switch (status) {
+                case 'connecting': badgeClass = 'status-connecting'; statusText = message || 'Connecting...'; break;
+                case 'connected': badgeClass = 'status-connected'; statusText = message || 'Connected'; break;
+                case 'error': badgeClass = 'status-error'; statusText = message || 'Error'; break;
+                case 'disconnected': default: badgeClass = 'status-disconnected'; statusText = message || 'Disconnected'; break;
+            }
+            wsStatusSpan.innerHTML = `<span class="badge ${badgeClass}">${statusText}</span>`;
+        }
+        
+        function createTableStructure(symbols) {
+            if (loadingIndicator) {
+                loadingIndicator.remove();
+                loadingIndicator = null;
+            }
+            
+            let headerHtml = '<tr><th>Account</th>';
+            symbols.forEach(symbol => {
+                headerHtml += `<th>${symbol}</th>`;
+            });
+            headerHtml += '</tr>';
+
+            tableWrapper.innerHTML = `
+                <table class="table table-bordered table-hover table-sm">
+                    <thead id="spreads-table-head">
+                        ${headerHtml}
+                    </thead>
+                    <tbody id="spreads-table-body">
+                        <!-- Account rows will be inserted here -->
+                    </tbody>
+                </table>`;
+        }
+
+        // --- Process Data Function ---
+        function processSpreadData(accounts) {
+            const tableBody = document.getElementById('spreads-table-body');
+            if (!tableBody) {
+                addLog("Table body not found. Cannot process data.", "Error");
+                return;
+            }
+
+            const newPreviousData = {};
+
+            accounts.forEach(account => {
+                const accountId = account.id;
+                const displayName = account.displayName || accountId;
+                if (!accountId) return;
+
+                newPreviousData[accountId] = {};
+                
+                let row = document.getElementById(`tr-${accountId}`);
+                if (!row) {
+                    row = tableBody.insertRow();
+                    row.id = `tr-${accountId}`;
+                    
+                    let cellHtml = `<td class="account-name">${displayName}</td>`;
+                    globalSymbols.forEach(symbol => {
+                        cellHtml += `<td id="td-${accountId}-${symbol}">-</td>`;
+                    });
+                    row.innerHTML = cellHtml;
+                }
+
+                globalSymbols.forEach(symbol => {
+                    const cell = document.getElementById(`td-${accountId}-${symbol}`);
+                    if (!cell) return;
+
+                    const rawSpread = account.spreads ? account.spreads[symbol] : undefined;
+                    const pointValue = account.defaultpointvalue ? account.defaultpointvalue[symbol] : undefined;
+                    
+                    let pipValue = null;
+                    let displayValue = "N/A";
+                    let newClass = "";
+
+                    if (typeof rawSpread !== 'undefined' && typeof pointValue !== 'undefined' && pointValue > 0) {
+                        pipValue = rawSpread / pointValue;
+                        displayValue = pipValue.toFixed(1);
+                        newClass = getSpreadClass(pipValue);
+                    }
+
+                    cell.textContent = displayValue;
+                    cell.className = newClass;
+
+                    // Flicker effect on change
+                    const oldPipValue = previousData[accountId] ? previousData[accountId][symbol] : null;
+                    if (pipValue !== oldPipValue) {
+                         // Use a timeout to remove the class, allows re-triggering
+                        cell.classList.add('flicker');
+                        setTimeout(() => cell.classList.remove('flicker'), 600);
+                    }
+                    
+                    newPreviousData[accountId][symbol] = pipValue;
+                });
+            });
+            
+            // Update the global state for the next comparison
+            previousData = newPreviousData;
+            lastUpdatedSpan.textContent = new Date().toLocaleString();
+        }
+
+
+        // --- WebSocket Functions ---
+        function connectWebSocket() {
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                return;
+            }
+            if (reconnectTimer) {
+                clearTimeout(reconnectTimer);
+                reconnectTimer = null;
+            }
+
+            addLog(`Connecting to ${WS_URL}...`);
+            updateWsStatus('connecting');
+
+            websocket = new WebSocket(WS_URL);
+
+            websocket.onopen = () => {
+                addLog("WebSocket connection established.");
+                updateWsStatus('connected');
+                
+                // 1. First, get the list of symbols to build the table
+                sendWebSocketRequest('get_global_symbols')
+                    .then(data => {
+                        if (data && Array.isArray(data.symbols)) {
+                            globalSymbols = data.symbols;
+                            addLog(`Global symbols received (${globalSymbols.length}). Creating table.`, "WS");
+                            createTableStructure(globalSymbols);
+
+                            // 2. Now that the table is ready, subscribe to spread updates
+                            return sendWebSocketRequest('subscribe_spreads');
+                        } else {
+                            throw new Error("Invalid format for global symbols.");
+                        }
+                    })
+                    .then(() => {
+                        addLog("Successfully subscribed to spread updates.", "FE");
+                    })
+                    .catch(error => {
+                        addLog(`Initialization failed: ${error}`, "Error");
+                        if (loadingIndicator) {
+                            loadingIndicator.innerHTML = `<p class="text-danger">Error initializing data: ${error}</p>`;
+                        }
+                    });
+            };
+
+            websocket.onmessage = (event) => {
+                try {
+                    const message = JSON.parse(event.data);
+
+                    if (message.type === 'spreads_update') {
+                        if (message.data && Array.isArray(message.data.accounts)) {
+                            processSpreadData(message.data.accounts);
+                        } else {
+                            addLog(`Received invalid spreads_update structure.`, "WS");
+                        }
+                    } 
+                    // This page doesn't send requests that need responses after init,
+                    // but we keep the logic for robustness.
+                    else if (message.requestId) {
+                        // Logic to handle promise-based responses for requests
+                    } 
+                    else {
+                        addLog(`Received unhandled message type: ${message.type}`, "WS");
+                    }
+
+                } catch (error) {
+                    addLog(`Error processing WebSocket message: ${error}`, "Error");
+                }
+            };
+
+            websocket.onerror = (event) => {
+                addLog(`WebSocket Error.`, "Error");
+                console.error("WebSocket Error:", event);
+                updateWsStatus('error', 'Connection Error');
+            };
+
+            websocket.onclose = (event) => {
+                addLog(`WebSocket connection closed.`);
+                updateWsStatus('disconnected');
+                previousData = {};
+
+                if (!reconnectTimer) {
+                    addLog(`Attempting to reconnect in ${RECONNECT_DELAY_MS / 1000} seconds...`);
+                    reconnectTimer = setTimeout(connectWebSocket, RECONNECT_DELAY_MS);
+                }
+            };
+        }
+
+        function sendWebSocketRequest(command, payload = {}) {
+             // Simplified from your example as we don't need the complex promise logic here after init
+             // but keeping the same message structure for the backend.
+            return new Promise((resolve, reject) => {
+                if (!websocket || websocket.readyState !== WebSocket.OPEN) {
+                    return reject('WebSocket is not connected.');
+                }
+                const requestId = generateRequestId();
+                const message = {
+                    receiver: "proplink", // Assuming this is needed by your backend
+                    data: {
+                        requestId: requestId,
+                        command: command,
+                        payload: payload
+                    }
+                };
+                
+                // This is a simplified version just for initialization.
+                // A full implementation would use the pendingRequests map.
+                const tempListener = (event) => {
+                    const response = JSON.parse(event.data);
+                    if (response.requestId === requestId) {
+                        websocket.removeEventListener('message', tempListener);
+                        if(response.status === 'ok') {
+                            resolve(response.data);
+                        } else {
+                            reject(response.error || 'Request failed');
+                        }
+                    }
+                };
+                websocket.addEventListener('message', tempListener);
+                
+                // Timeout for the request
+                setTimeout(() => {
+                    websocket.removeEventListener('message', tempListener);
+                    reject('Request timed out');
+                }, 5000);
+
+                websocket.send(JSON.stringify(message));
+                addLog(`Sent command: ${command}`, "FE");
+            });
+        }
+
+        // --- Initial Load ---
+        document.addEventListener('DOMContentLoaded', () => {
+            connectWebSocket();
+        });
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,104 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #FAFAFA; /* Pure premium Apple light background */
+  --foreground: #0A0A0A; /* Deep dark gray / black */
+  --border: rgba(0, 0, 0, 0.06); /* Razor-thin dark hairline border */
+  --glow: rgba(0, 0, 0, 0.01);
+  --radial-color: rgba(0, 0, 0, 0.02);
+}
+
+.dark {
+  --background: #0A0A0A; /* Pure premium Apple dark background */
+  --foreground: #FAFAFA; /* Off-white */
+  --border: rgba(255, 255, 255, 0.08); /* Precise thin hairline white border */
+  --glow: rgba(255, 255, 255, 0.03); /* Extremely soft white spotlight */
+  --radial-color: rgba(255, 255, 255, 0.05);
+}
+
+body {
+  background-color: var(--background) !important;
+  background-image: radial-gradient(circle at 50% -20%, var(--radial-color) 0%, transparent 60%) !important;
+  background-attachment: fixed !important;
+  color: var(--foreground);
+  transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+/* Custom High-density Scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.05);
+}
+.dark ::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.3);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.3);
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Elite Apple Glassmorphism Panels */
+.glass-panel {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.dark .glass-panel {
+  background: rgba(15, 15, 15, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.glass-panel-heavy {
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.dark .glass-panel-heavy {
+  background: rgba(10, 10, 10, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+/* Dynamic update flickers */
+@keyframes number-flicker {
+  0%, 100% { 
+    opacity: 1; 
+    transform: scale(1);
+  }
+  50% { 
+    opacity: 0.9; 
+    transform: scale(1.01);
+  }
+}
+
+.animate-flicker {
+  animation: number-flicker 0.4s ease-in-out;
+}
+
+/* Custom Spread Flicker */
+@keyframes spread-flash {
+  0%, 100% { background-color: transparent; }
+  50% { background-color: rgba(234, 179, 8, 0.18); }
+}
+.animate-spread-flash {
+  animation: spread-flash 0.6s ease-in-out;
+}
+
+

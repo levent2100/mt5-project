@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reference Account Control (WebSocket)</title> <!-- Changed Title -->
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet"
+        integrity="sha384-T3c6CoIi6uLrA9TneNEoa7RxnatzjcDSCmG1MXxSR1GAsXEV/Dwwykc2MPK8M2HN" crossorigin="anonymous">
+    <!-- Optional: Add Bootstrap Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <style>
+        /* Custom Styles (Same as before, adjusted for single view focus) */
+        body {
+            padding-top: 1rem;
+            background-color: #f8f9fa;
+        }
+
+        .table-sm th,
+        .table-sm td {
+            padding: 0.4rem;
+            font-size: 0.85rem;
+            vertical-align: middle;
+        }
+
+        .pnl-positive {
+            color: #198754;
+            font-weight: 500;
+        }
+
+        .pnl-negative {
+            color: #dc3545;
+            font-weight: 500;
+        }
+
+        .position-buy {
+            color: #0d6efd;
+            font-weight: 500;
+        }
+
+        .position-sell {
+            color: #dc3545;
+            font-weight: 500;
+        }
+
+        #log-output {
+            height: 150px;
+            font-size: 0.8rem;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            background-color: #e9ecef;
+            border: 1px solid #ced4da;
+        }
+
+        @keyframes flicker {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.75;
+            }
+        }
+
+        .flicker {
+            animation: flicker 0.5s ease-in-out;
+        }
+
+        .action-buttons button {
+            margin-left: 5px;
+        }
+
+        .section {
+            border: 1px solid #dee2e6;
+            border-radius: 0.375rem;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            background-color: #fff;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, .05);
+        }
+
+        .table-responsive {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .small-text {
+            font-size: 0.8rem;
+        }
+
+        /* Connection Status Styles */
+        #ws-status .badge { vertical-align: middle; }
+        .status-connecting { background-color: #ffc107; color: #000;} /* Orange */
+        .status-connected { background-color: #198754;} /* Green */
+        .status-disconnected { background-color: #6c757d;} /* Grey */
+        .status-error { background-color: #dc3545;} /* Red */
+
+        /* Hide number input spinners for a cleaner look */
+        input[type=number]::-webkit-inner-spin-button,
+        input[type=number]::-webkit-outer-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        input[type=number] {
+            -moz-appearance: textfield; /* Firefox */
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <!-- Header Row -->
+        <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap">
+            <h1 class="mb-0 me-3" id="account-title">Reference Account Connecting...</h1>
+            <div class="d-flex align-items-center flex-grow-1 justify-content-end flex-wrap">
+                 <!-- WebSocket Status -->
+                <span id="ws-status" class="me-3"><span class="badge status-connecting">Connecting...</span></span>
+                 <span class="me-3">
+                    <small>Realized: <strong id="realized-pnl" class="me-1">N/A</strong></small>
+                    <small>Unrealized: <strong id="unrealized-pnl">N/A</strong></small>
+                </span>
+                 <small class="text-muted text-nowrap">Last Update: <span id="last-updated"
+                        class="fw-bold">Never</span></small>
+                 <button class="btn btn-sm btn-outline-secondary ms-2" id="refresh-now" title="Request Manual Refresh">
+                     <i class="bi bi-arrow-clockwise"></i>
+                </button>
+            </div>
+        </div>
+
+        <div id="alert-container"></div> <!-- For status/error/action messages -->
+
+        <!-- Quick Actions Section -->
+        <div class="section">
+             <div class="row g-2 align-items-center">
+                 <div class="col-md-auto">
+                    <label for="symbolSelector" class="form-label visually-hidden">Symbol:</label>
+                     <select class="form-select form-select-sm" id="symbolSelector" aria-label="Select Symbol">
+                        <option value="">Select Symbol</option>
+                        <!-- Options populated by JS -->
+                     </select>
+                 </div>
+                 <div class="col-md-auto">
+                     <label for="trade-qty" class="form-label visually-hidden">SL Pips:</label>
+                     <input type="number" class="form-control form-control-sm" id="trade-qty" value="" min="0"
+                        placeholder="SL Pips" style="width: 80px;" aria-label="SL Pips">
+                 </div>
+                 <div class="col-md-auto action-buttons ms-md-2">
+                     <button class="btn btn-sm btn-success" id="btn-buy" disabled title="Buy Market (Scaled)"><i
+                            class="bi bi-graph-up-arrow me-1"></i>Buy</button>
+                     <button class="btn btn-sm btn-danger" id="btn-sell" disabled title="Sell Market (Scaled)"><i
+                            class="bi bi-graph-down-arrow me-1"></i>Sell</button>
+                     <button class="btn btn-sm btn-secondary" id="btn-flatten-symbol" disabled
+                        title="Flatten Selected Symbol (Scaled)"><i class="bi bi-x-octagon me-1"></i>Flatten
+                        Sym</button>
+                 </div>
+             </div>
+        </div>
+
+        <!-- Positions Section -->
+        <div class="section">
+            <h6 class="mb-2">Reference Account: Open Positions</h6>
+            <div class="table-responsive">
+                <table class="table table-sm table-striped table-hover">
+                    <thead>
+                        <tr>
+                            <th>Symbol</th>
+                            <th>Dir</th>
+                            <th>Qty</th>
+                            <th>Avg Price</th>
+                            <th>PNL</th>
+                        </tr>
+                    </thead>
+                    <tbody id="positions-table-body">
+                        <tr>
+                            <td colspan="5" class="text-center text-muted">Waiting for connection...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Orders & Global Actions Section -->
+         <div class="section">
+             <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap">
+                <h6 class="mb-0 me-3">Reference Account: Pending Orders</h6>
+                 <div class="action-buttons">
+                    <!-- These actions likely apply scaled across all accounts via backend -->
+                    <button class="btn btn-sm btn-warning" id="btn-cancel-pending" disabled
+                        title="Cancel All Pending Orders (Scaled)"><i class="bi bi-slash-circle me-1"></i>Cancel All
+                        Pending</button>
+                    <button class="btn btn-sm btn-danger" id="btn-flatten-everything" disabled
+                        title="Flatten Entire Portfolio (Scaled)"><i class="bi bi-sign-stop-fill me-1"></i>FLATTEN
+                        EVERYTHING</button>
+                </div>
+            </div>
+             <div class="table-responsive">
+                 <table class="table table-sm table-striped table-hover">
+                     <thead>
+                        <tr>
+                            <th>Symbol</th>
+                            <th>Dir</th>
+                            <th>Qty</th>
+                            <th>Type</th>
+                            <th>Price</th>
+                        </tr>
+                    </thead>
+                     <tbody id="orders-table-body">
+                        <tr>
+                            <td colspan="5" class="text-center text-muted">Waiting for connection...</td>
+                        </tr>
+                    </tbody>
+                </table>
+             </div>
+         </div>
+
+        <!-- Logs Section -->
+        <div class="section">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0">Logs / Status</h6>
+                 <button class="btn btn-sm btn-outline-secondary" id="clear-log" title="Clear Log"><i
+                        class="bi bi-eraser"></i></button>
+            </div>
+            <textarea class="form-control" id="log-output" rows="5" readonly>Initializing...</textarea>
+        </div>
+
+    </div> <!-- /container -->
+
+    <!-- Bootstrap JS Bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"
+        integrity="sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL"
+        crossorigin="anonymous"></script>
+
+    <script>
+        // --- DOM Elements ---
+        const accountTitle = document.getElementById('account-title');
+        const alertContainer = document.getElementById('alert-container');
+        const symbolSelector = document.getElementById('symbolSelector');
+        const tradeQtyInput = document.getElementById('trade-qty');
+        const btnBuy = document.getElementById('btn-buy');
+        const btnSell = document.getElementById('btn-sell');
+        const btnFlattenSymbol = document.getElementById('btn-flatten-symbol');
+        const realizedPnlSpan = document.getElementById('realized-pnl');
+        const unrealizedPnlSpan = document.getElementById('unrealized-pnl');
+        const positionsTableBody = document.getElementById('positions-table-body');
+        const ordersTableBody = document.getElementById('orders-table-body');
+        const btnCancelPending = document.getElementById('btn-cancel-pending');
+        const btnFlattenEverything = document.getElementById('btn-flatten-everything');
+        const logOutput = document.getElementById('log-output');
+        const lastUpdatedSpan = document.getElementById('last-updated');
+        const refreshButton = document.getElementById('refresh-now');
+        const clearLogButton = document.getElementById('clear-log');
+        const wsStatusSpan = document.getElementById('ws-status');
+
+        // --- State & Config ---
+        const WS_URL = 'ws://localhost:9999';
+        const RECONNECT_DELAY_MS = 5000;
+        let websocket = null;
+        let referenceAccountData = null; // Store the single account data
+        let globalSymbolsList = [];
+        let globalSlPips = {}; // Store the default SL pips for symbols
+        let previousAccountState = {}; // Still useful for flicker on the single account
+        let displayedAccountId = null; // Store the ID of the account being displayed
+        let pendingRequests = {}; // { requestId: { resolve, reject, timeout } }
+        let reconnectTimer = null;
+
+        // --- Utility Functions --- (Mostly same as before)
+        function formatCurrency(value) { return (value !== null && value !== undefined) ? value.toFixed(2) + '$' : 'N/A'; }
+        function formatNumber(value, decimals = 2) { return (value !== null && value !== undefined) ? value.toFixed(decimals) : 'N/A'; }
+        function getPnlClass(value) { if (value === null || value === undefined || value === 0) return ''; return value > 0 ? 'pnl-positive' : 'pnl-negative'; }
+        function getPositionDirectionClass(direction) { return direction === 'BUY' ? 'position-buy' : 'position-sell'; }
+        function addLog(message, source = "FE") { const ts = new Date().toLocaleTimeString(); logOutput.value = `[${ts}][${source}] ${message}\n${logOutput.value}`; const l = logOutput.value.split('\n'); if (l.length > 100) logOutput.value = l.slice(0, 100).join('\n'); }
+        function displayAlert(message, type = 'danger', isGlobal = true, duration = 5000) { const container = alertContainer; // Always use global for this simple page
+            const alertId = `alert-${Date.now()}`; // Unique ID for timeout
+            const alertHtml = `<div id="${alertId}" class="alert alert-${type} alert-dismissible fade show" role="alert">${message}<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button></div>`;
+            container.insertAdjacentHTML('beforeend', alertHtml); // Append new alerts
+            // Auto-dismiss
+            if (duration > 0) { setTimeout(() => { const alertElement = document.getElementById(alertId); if (alertElement) { bootstrap.Alert.getOrCreateInstance(alertElement).close(); } }, duration); }
+        }
+        function clearAlerts() { alertContainer.innerHTML = ''; }
+        function generateRequestId() { return crypto.randomUUID(); } // Use built-in UUID generator
+
+        // --- UI Update Functions ---
+        function updateWsStatus(status, message) {
+            let badgeClass = 'status-disconnected';
+            let statusText = message || 'Disconnected';
+
+            switch (status) {
+                case 'connecting':
+                    badgeClass = 'status-connecting';
+                    statusText = message || 'Connecting...';
+                    break;
+                case 'connected':
+                    badgeClass = 'status-connected';
+                    statusText = message || 'Connected';
+                    break;
+                case 'error':
+                    badgeClass = 'status-error';
+                    statusText = message || 'Error';
+                    break;
+                case 'disconnected':
+                default:
+                    badgeClass = 'status-disconnected';
+                    statusText = message || 'Disconnected';
+                    break;
+            }
+            wsStatusSpan.innerHTML = `<span class="badge ${badgeClass}">${statusText}</span>`;
+        }
+
+        function updateSymbolSelector(symbols) {
+            if (!symbols || !Array.isArray(symbols)) {
+                addLog("Received invalid symbol list.", "WS");
+                symbols = []; // Ensure it's an array
+            }
+            const currentSelection = symbolSelector.value;
+            // Only update if the list content actually changes
+            if (JSON.stringify(symbols) !== JSON.stringify(globalSymbolsList)) {
+                addLog(`Updating symbols: ${symbols.join(', ')}`, "WS");
+                globalSymbolsList = symbols;
+                symbolSelector.innerHTML = '<option value="">Select Symbol</option>';
+                symbols.forEach(sym => { const option = document.createElement('option'); option.value = sym; option.textContent = sym; symbolSelector.appendChild(option); });
+                // Try to restore selection
+                if (globalSymbolsList.includes(currentSelection)) {
+                    symbolSelector.value = currentSelection;
+                } else {
+                    symbolSelector.value = ""; // Reset if previous selection is gone
+                }
+            } else {
+                 addLog("Symbol list unchanged.", "WS");
+            }
+             updateActionButtons(); // Update buttons regardless, as connection state might affect them
+        }
+
+        function updateActionButtons() {
+            const connected = websocket && websocket.readyState === WebSocket.OPEN;
+            const accountLoaded = !!referenceAccountData;
+            const symbolSelected = !!symbolSelector.value;
+            const qtyValid = parseFloat(tradeQtyInput.value) > 0;
+
+            // Basic connectivity check first
+            refreshButton.disabled = !connected;
+
+            // Actions depend on connection, having account data, and potentially symbol/qty
+            btnBuy.disabled = !connected || !accountLoaded || !symbolSelected || !qtyValid;
+            btnSell.disabled = !connected || !accountLoaded || !symbolSelected || !qtyValid;
+            btnFlattenSymbol.disabled = !connected || !accountLoaded || !symbolSelected;
+            btnCancelPending.disabled = !connected || !accountLoaded; // Doesn't need symbol
+            btnFlattenEverything.disabled = !connected || !accountLoaded; // Doesn't need symbol
+        }
+
+        function updateAccountDetails(account) { // Takes the single account object
+            clearAlerts(); // Clear old alerts on new data
+
+            if (!account) {
+                referenceAccountData = null;
+                accountTitle.textContent = 'Reference Account Data Unavailable';
+                realizedPnlSpan.textContent = 'N/A'; unrealizedPnlSpan.textContent = 'N/A';
+                positionsTableBody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Waiting for data...</td></tr>';
+                ordersTableBody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Waiting for data...</td></tr>';
+                addLog("Received null account data.", "WS");
+                updateActionButtons();
+                return;
+            }
+
+            referenceAccountData = account; // Store the data globally
+            displayedAccountId = account.id; // Store the ID
+
+            accountTitle.textContent = `${account.displayName || account.id} (${account.type || 'N/A'})`;
+
+            // Status Alert (show only if not connected or error)
+            if (account.status !== 'Connected') {
+                displayAlert(`Account Status: ${account.status || 'Unknown'}. ${account.error || ''}`,
+                             account.status === 'Error' ? 'danger' : 'warning', true, 0); // Don't auto-dismiss warnings/errors
+            }
+
+            // PNL Update with Flicker
+            let realizedPNLHtml = formatCurrency(account.realizedPNL);
+            let unrealizedPNLHtml = formatCurrency(account.unrealizedPNL);
+            const prevAcc = previousAccountState[account.id];
+
+            if (prevAcc && prevAcc.unrealizedPNL !== account.unrealizedPNL) {
+                unrealizedPNLHtml = `<span class="flicker">${formatCurrency(account.unrealizedPNL)}</span>`;
+            }
+            if (prevAcc && prevAcc.realizedPNL !== account.realizedPNL) {
+                realizedPNLHtml = `<span class="flicker">${formatCurrency(account.realizedPNL)}</span>`;
+            }
+            realizedPnlSpan.innerHTML = realizedPNLHtml;
+            unrealizedPnlSpan.innerHTML = unrealizedPNLHtml;
+            realizedPnlSpan.className = getPnlClass(account.realizedPNL);
+            unrealizedPnlSpan.className = getPnlClass(account.unrealizedPNL);
+
+            // Positions Table
+            if (account.positions && account.positions.length > 0) {
+                positionsTableBody.innerHTML = '';
+                account.positions.forEach(p => {
+                    const row = positionsTableBody.insertRow();
+                    const qD = p.quantity % 1 !== 0 ? 2 : 0;
+                    const pD = p.avgPrice > 10 ? 2 : (p.avgPrice < 0.1 ? 5 : 4);
+                    row.innerHTML = `<td>${p.displaySymbol || p.symbol}</td><td class="${getPositionDirectionClass(p.direction)}">${p.direction}</td><td>${formatNumber(Math.abs(p.quantity), qD)}</td><td>${formatNumber(p.avgPrice, pD)}</td><td class="${getPnlClass(p.pnl)}">${formatCurrency(p.pnl)}</td>`;
+                });
+            } else {
+                positionsTableBody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No open positions</td></tr>';
+            }
+
+            // Orders Table
+            if (account.orders && account.orders.length > 0) {
+                ordersTableBody.innerHTML = '';
+                account.orders.forEach(o => {
+                    const row = ordersTableBody.insertRow();
+                    const qD = o.quantity % 1 !== 0 ? 2 : 0;
+                    const pD = o.price > 10 ? 2 : (o.price < 0.1 ? 5 : 4);
+                    row.innerHTML = `<td>${o.displaySymbol || o.symbol}</td><td class="${getPositionDirectionClass(o.direction)}">${o.direction}</td><td>${formatNumber(o.quantity, qD)}</td><td>${o.orderType || 'N/A'}</td><td>${formatNumber(o.price, pD)}</td>`;
+                });
+            } else {
+                ordersTableBody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No pending orders</td></tr>';
+            }
+
+            updateActionButtons();
+            // Store current state *after* rendering, make a copy
+            // Use JSON stringify/parse for a deep clone to avoid reference issues
+            previousAccountState[account.id] = JSON.parse(JSON.stringify(account));
+
+            // Update timestamp from account data if available, else use current time
+            const updateTime = account.lastUpdated ? new Date(account.lastUpdated) : new Date();
+            lastUpdatedSpan.textContent = updateTime.toLocaleString();
+
+        }
+
+        // --- WebSocket Functions ---
+        function connectWebSocket() {
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                addLog("WebSocket already open.");
+                return;
+            }
+            if (reconnectTimer) {
+                clearTimeout(reconnectTimer);
+                reconnectTimer = null;
+            }
+
+            addLog(`Connecting to ${WS_URL}...`);
+            updateWsStatus('connecting');
+            // Clear old data when attempting connection
+            updateAccountDetails(null);
+            updateSymbolSelector([]);
+            positionsTableBody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Connecting...</td></tr>';
+            ordersTableBody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Connecting...</td></tr>';
+
+
+            websocket = new WebSocket(WS_URL);
+
+            websocket.onopen = () => {
+                addLog("WebSocket connection established.");
+                updateWsStatus('connected');
+                clearAlerts(); // Clear any previous connection errors
+
+                // Reject any outstanding requests from previous connection attempt
+                Object.values(pendingRequests).forEach(p => p.reject('WebSocket reconnected before response received.'));
+                pendingRequests = {};
+
+                // Request initial state and subscribe to updates
+                sendWebSocketRequest('get_account_status')
+                  .then(data => {
+                    if (data && data.account) { // Expecting { account: {...} }
+                      addLog("Initial account status received.", "WS");
+                      updateAccountDetails(data.account);
+                    } else {
+                      addLog("Received invalid initial account status structure.", "WS");
+                      displayAlert("Failed to get initial account status: Invalid data format.", "warning");
+                    }
+                  })
+                  .catch(error => {
+                     addLog(`Error getting initial account status: ${error}`, "WS");
+                     displayAlert(`Error getting initial account status: ${error}`, "danger");
+                  });
+
+                sendWebSocketRequest('get_global_symbols')
+                  .then(data => {
+                      if (data && data.symbols) { // Expecting { symbols: [...], slpips: {...} }
+                          addLog("Global symbols and SL pips received.", "WS");
+                          globalSlPips = data.slpips || {}; // Store SL pips
+                          updateSymbolSelector(data.symbols);
+                      } else {
+                          addLog("Received invalid global symbols structure.", "WS");
+                          displayAlert("Failed to get global symbols: Invalid data format.", "warning");
+                          updateSymbolSelector([]); // Clear selector on error
+                      }
+                    })
+                  .catch(error => {
+                    addLog(`Error getting global symbols: ${error}`, "WS");
+                    displayAlert(`Error getting global symbols: ${error}`, "danger");
+                    updateSymbolSelector([]); // Clear selector on error
+                  });
+
+                // Subscribe (fire and forget, or handle response if backend confirms subs)
+                sendWebSocketRequest('subscribe_account')
+                    .then(() => addLog("Subscription request for account updates sent.", "FE"))
+                    .catch(err => addLog(`Failed to send account subscription request: ${err}`, "FE"));
+                sendWebSocketRequest('subscribe_logs')
+                    .then(() => addLog("Subscription request for logs sent.", "FE"))
+                    .catch(err => addLog(`Failed to send log subscription request: ${err}`, "FE"));
+            };
+
+            websocket.onmessage = (event) => {
+                try {
+                    const message = JSON.parse(event.data);
+                    // addLog(`Received raw: ${event.data}`, "WS-RAW"); // DEBUG
+
+                    // --- Response to a Request ---
+                    if (message.requestId && pendingRequests[message.requestId]) {
+                        const { resolve, reject, timeout } = pendingRequests[message.requestId];
+                        clearTimeout(timeout);
+
+                        if (message.status === 'ok') {
+                            addLog(`Received OK response for ReqID: ${message.requestId}`, "WS");
+                            resolve(message.data); // Resolve with the data part
+                        } else {
+                            const errorMsg = message.error || 'Unknown error from server';
+                            addLog(`Received ERROR response for ReqID: ${message.requestId} - ${errorMsg}`, "WS");
+                            reject(errorMsg); // Reject with the error message
+                            displayAlert(`Request Failed: ${errorMsg}`, 'warning');
+                        }
+                        delete pendingRequests[message.requestId];
+                    }
+                    // --- Server-Pushed Update ---
+                    else if (message.type) {
+                        switch (message.type) {
+                            case 'account_update':
+                                if (message.data && message.data.account) {
+                                     addLog(`Received account update push.`, "WS");
+                                     updateAccountDetails(message.data.account);
+                                } else {
+                                     addLog(`Received invalid account_update structure: ${event.data}`, "WS");
+                                }
+                                break;
+                            case 'log_update':
+                                if (message.data && message.data.message) {
+                                     addLog(message.data.message, message.data.source || "BE"); // Use source from backend if provided
+                                } else {
+                                     addLog(`Received invalid log_update structure: ${event.data}`, "WS");
+                                }
+                                break;
+                             case 'symbols_update': // Handle dynamic symbol updates if needed
+                                if (message.data && message.data.symbols) {
+                                    addLog("Received symbols update push.", "WS");
+                                    globalSlPips = message.data.slpips || globalSlPips; // Update SL pips if provided
+                                    updateSymbolSelector(message.data.symbols);
+                                } else {
+                                    addLog(`Received invalid symbols_update structure: ${event.data}`, "WS");
+                                }
+                                break;
+                            default:
+                                addLog(`Received unhandled message type: ${message.type}`, "WS");
+                                console.warn("Unhandled WebSocket message:", message);
+                        }
+                    }
+                    // --- Unrecognized Message ---
+                    else {
+                        addLog(`Received unrecognized message format: ${event.data}`, "WS");
+                        console.warn("Unrecognized WebSocket message:", message);
+                    }
+
+                } catch (error) {
+                    addLog(`Error processing WebSocket message: ${error}`, "WS");
+                    console.error("Failed to parse or process WebSocket message:", event.data, error);
+                }
+            };
+
+            websocket.onerror = (event) => {
+                addLog(`WebSocket Error: ${event.type || 'Unknown error'}`, "WS");
+                console.error("WebSocket Error:", event);
+                updateWsStatus('error', 'Connection Error');
+                // No automatic reconnect on error, wait for close.
+            };
+
+            websocket.onclose = (event) => {
+                addLog(`WebSocket connection closed. Code: ${event.code}, Reason: "${event.reason || 'No reason given'}"`, "WS");
+                updateWsStatus('disconnected');
+                referenceAccountData = null; // Clear data on disconnect
+                updateActionButtons(); // Disable buttons
+
+                // Reject any outstanding requests
+                 Object.values(pendingRequests).forEach(p => p.reject('WebSocket closed before response received.'));
+                 pendingRequests = {};
+
+
+                // Attempt to reconnect after a delay
+                if (!reconnectTimer) {
+                    addLog(`Attempting to reconnect in ${RECONNECT_DELAY_MS / 1000} seconds...`);
+                    reconnectTimer = setTimeout(connectWebSocket, RECONNECT_DELAY_MS);
+                }
+            };
+        }
+
+        // Function to send requests and handle responses via Promises
+        function sendWebSocketRequest(command, payload = {}, timeoutMs = 10000) {
+            return new Promise((resolve, reject) => {
+                if (!websocket || websocket.readyState !== WebSocket.OPEN) {
+                    return reject('WebSocket is not connected.');
+                }
+
+                const requestId = generateRequestId();
+                const message = {
+                                    receiver:"proplink",
+                                    data:{
+                                        requestId: requestId,
+                                        command: command,
+                                        payload: payload // Payload can be empty {}
+                                    }
+                                };
+
+                const timeout = setTimeout(() => {
+                    if (pendingRequests[requestId]) {
+                        addLog(`Request timed out: ${command} (ReqID: ${requestId})`, "FE");
+                        pendingRequests[requestId].reject(`Request timed out after ${timeoutMs / 1000}s`);
+                        delete pendingRequests[requestId];
+                    }
+                }, timeoutMs);
+
+                pendingRequests[requestId] = { resolve, reject, timeout };
+
+                try {
+                    const messageString = JSON.stringify(message);
+                    addLog(`Sending ${command}: ${messageString}`, "FE");
+                    websocket.send(messageString);
+                } catch (error) {
+                    addLog(`Error sending WebSocket message: ${error}`, "FE");
+                    clearTimeout(timeout);
+                    delete pendingRequests[requestId];
+                    reject(`Failed to send message: ${error}`);
+                }
+            });
+        }
+
+
+        // --- Action Functions (Now use sendWebSocketRequest) ---
+        function handleAction(command, payload, successMsg, errorMsgPrefix) {
+            addLog(`Triggering Action: ${command}`, "FE");
+            clearAlerts();
+             displayAlert(`Sending ${command}...`, 'info', true, 2000); // Temporary feedback
+
+            sendWebSocketRequest(command, payload)
+                .then(data => {
+                    const message = data?.message || successMsg || `${command} successful.`;
+                    addLog(`Success: ${command} - ${message}`, "WS");
+                    displayAlert(message, 'success', true);
+                     // Optionally trigger a manual refresh if needed, though push should handle it
+                     // sendWebSocketRequest('get_account_status');
+                })
+                .catch(error => {
+                    const message = error || `${errorMsgPrefix} failed.`;
+                    addLog(`FAILED: ${command} - ${message}`, "WS");
+                    displayAlert(`${errorMsgPrefix} Failed: ${message}`, 'danger', true, 0); // Don't auto-dismiss errors
+                });
+        }
+
+        // --- Event Listeners ---
+        symbolSelector.addEventListener('change', () => {
+            const selectedSymbol = symbolSelector.value;
+            if (selectedSymbol && globalSlPips[selectedSymbol]) {
+                const defaultSl = globalSlPips[selectedSymbol];
+                tradeQtyInput.value = defaultSl;
+                tradeQtyInput.min = defaultSl; // Set min for browser validation
+            } else {
+                tradeQtyInput.value = '';
+                tradeQtyInput.min = '0';
+            }
+            updateActionButtons();
+        });
+
+        tradeQtyInput.addEventListener('input', updateActionButtons);
+
+        tradeQtyInput.addEventListener('change', () => { // On blur/commit
+            const selectedSymbol = symbolSelector.value;
+            if (selectedSymbol && globalSlPips[selectedSymbol]) {
+                const defaultSl = globalSlPips[selectedSymbol];
+                const currentVal = parseFloat(tradeQtyInput.value);
+                if (currentVal < defaultSl) {
+                    addLog(`SL pips for ${selectedSymbol} cannot be less than default (${defaultSl}). Resetting.`, 'FE');
+                    tradeQtyInput.value = defaultSl;
+                }
+            }
+        });
+
+
+        btnBuy.addEventListener('click', () => { const s = symbolSelector.value, sl_pips = parseFloat(tradeQtyInput.value); if (!s || !sl_pips || sl_pips <= 0) return; handleAction('trade', { symbol: s, direction: 'buy', ordertype: 'market', qty: 0, sl_pips: sl_pips }, 'Buy order sent.', 'Buy'); });
+        btnSell.addEventListener('click', () => { const s = symbolSelector.value, sl_pips = parseFloat(tradeQtyInput.value); if (!s || !sl_pips || sl_pips <= 0) return; handleAction('trade', { symbol: s, direction: 'sell', ordertype: 'market', qty: 0, sl_pips: sl_pips }, 'Sell order sent.', 'Sell'); });
+        btnFlattenSymbol.addEventListener('click', () => { const s = symbolSelector.value; if (!s) return; const aN = referenceAccountData?.displayName || displayedAccountId || 'account'; if (confirm(`Flatten ${s} (scaled)?`)) handleAction('flatten', { instrument: s }, `Flatten ${s} request sent.`, `Flatten ${s}`); });
+        btnCancelPending.addEventListener('click', () => { if (confirm(`Cancel ALL PENDING orders (scaled)?`)) handleAction('cancel', {}, 'Cancel All Pending request sent.', 'Cancel All Pending'); });
+        btnFlattenEverything.addEventListener('click', () => { if (confirm(`DANGER! FLATTEN EVERYTHING (scaled)?`)) handleAction('flatten', {}, 'Flatten Everything request sent.', 'Flatten Everything'); }); // Empty payload means flatten all
+        refreshButton.addEventListener('click', () => {
+            addLog("Manual refresh requested.", "FE");
+             displayAlert("Requesting refresh...", 'info', true, 2000);
+            sendWebSocketRequest('get_account_status') // Request fresh data
+                .then(data => { if (data?.account) updateAccountDetails(data.account); }) // Update UI on response
+                .catch(error => { displayAlert(`Refresh failed: ${error}`, 'warning'); });
+             sendWebSocketRequest('get_global_symbols') // Also refresh symbols
+                .then(data => {
+                    if (data?.symbols) {
+                        globalSlPips = data.slpips || {};
+                        updateSymbolSelector(data.symbols);
+                    }
+                })
+                .catch(error => { displayAlert(`Symbol refresh failed: ${error}`, 'warning'); });
+        });
+        clearLogButton.addEventListener('click', () => { logOutput.value = ''; addLog("Log cleared.", "FE"); });
+
+        // --- Initial Load ---
+        document.addEventListener('DOMContentLoaded', () => {
+            addLog('Dashboard Initialized. Connecting WebSocket...');
+            updateActionButtons(); // Initial state (mostly disabled)
+            connectWebSocket(); // Start connection
+        });
+
+    </script>
+
+</body>
+</html>

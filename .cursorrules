@@ -1,0 +1,85 @@
+# Prop Firm Trading Farm Monorepo Standards & AI Rules
+
+This document establishes the architecture, folder structure, coding guidelines, and design principles for the Prop Firm Trading Farm monorepo.
+
+---
+
+## 1. Directory Structure & Monorepo Layout
+
+The project is structured as a clean monorepo with three primary component layers:
+
+```
+/pjt_src/mt5-project/
+├── backend/            # FastAPI WebSocket central server (distributes trading commands)
+├── ui/                 # Next.js & Tailwind CSS modern web interface
+├── ui-legacy/          # Legacy static HTML dashboard pages (for reference and parity)
+├── scripts/            # Python HTTP bridges (interfacing with MT5/Wine) & config settings
+│   ├── propfundsettings.json # Central farm settings and account parameters
+│   └── mt5_http_bridge1.py   # Base Python bridge script for individual MT5 instances
+├── mt5/                # Docker configuration, Wine/X11 setup, supervisor configurations
+└── .cursorrules        # This monorepo rules file
+```
+
+---
+
+## 2. Technology Stack & Specifications
+
+### 2.1. Central Backend (FastAPI)
+- **Framework:** FastAPI (Python 3.10+).
+- **Server:** Uvicorn (Asynchronous ASGI).
+- **Communication Protocols:**
+  - **WebSockets:** Port `9999` (or custom configurable). Dedicated endpoints for active subscription channels (`/ws`).
+  - **HTTP Client:** Asynchronous `httpx` for concurrent API polling to individual Python HTTP bridges.
+- **Packages & Libraries:** FastAPI, Pydantic, Uvicorn, httpx, websockets.
+
+### 2.2. Modern Web UI (Next.js & Tailwind)
+- **Framework:** Next.js (App Router, TypeScript).
+- **Styling:** Tailwind CSS (Modern premium design system).
+- **Typography:** Modern clean fonts (e.g. Google Fonts Inter, Outfit, or Roboto).
+- **UI Architecture:** Unified single-page dashboard containing:
+  - **Reference Account Execution Tab** (Buy/Sell, Stop Loss pips, positions/orders).
+  - **Multi-Account Farm Grid** (Account state cards, realized/unrealized metrics).
+  - **Real-time Spreads Monitor** (Instrument live bid/ask spreads).
+  - **In-App Activity Logs Stream** (System updates, trade results).
+- **No Browser Dialogs:** Native `alert()`, `confirm()`, and `prompt()` dialogues are **strictly forbidden** in production. All confirmation and warning workflows must use premium custom-styled React/Tailwind modal overlays.
+
+### 2.3. MT5 HTTP Bridges
+- **Runtime:** Running alongside each MetaTrader 5 instance in Wine/Windows.
+- **Port Ranges:** Configured dynamically in `propfundsettings.json` (e.g. `58801-58810`).
+- **Endpoint Operations:** Exposes HTTP POST methods for direct MT5 control (`trade`, `accountstatus`, `cancelandflatten`, `movestoploss`, `getspreads`, `modify_order`, `cancel_order`, `manage_position_stops`).
+
+---
+
+## 3. Design Aesthetics & Visual Polish
+
+First impressions matter! Our web application must deliver a state-of-the-art visual experience:
+
+- **Color Scheme (HSL Slate / Glassmorphism):**
+  - Use custom HSL neutral slates (e.g. `bg-slate-950` or custom dark slate backgrounds) paired with harmonized neon colors (e.g., emerald for profit/buy, rose for loss/sell, indigo for active UI overlays).
+  - Apply semi-transparent glassmorphic panels (`bg-slate-900/60 backdrop-blur-md border border-slate-800/80`) for widgets.
+- **Micro-Animations & Transitions:**
+  - Leverage transition utilities for hover effects, active button states, and loading states.
+  - Implement a subtle **flicker / pulse effect** when real-time numbers (like realized/unrealized PNL) change.
+- **Layout Responsiveness:**
+  - Grid-based dashboards (`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6`) adapting seamlessly to any desktop or tablet viewport.
+  - Clean card lists with status badges (`Connected`, `Connecting`, `Disconnected`, `Error`).
+
+---
+
+## 4. Secure Coding Guidelines
+
+We enforce strict secure coding practices in compliance with **Google SecureCoder** rules:
+
+- **Localhost Binding:** During development and local testing, all services (FastAPI, Next.js dev server, mock bridges) **MUST** listen exclusively on `127.0.0.1` or `localhost`, never `0.0.0.0`.
+- **WebSocket Input Validation:**
+  - FastAPI WebSocket handlers must parse incoming JSON payloads using explicit Pydantic schemas.
+  - Alphanumeric validation and type casting (e.g. ensuring `qty` is a float, `sl_pips` is a float/integer) must be strictly enforced.
+- **Frontend XSS Prevention:**
+  - Rely exclusively on framework-native React JSX escaping.
+  - Never use `dangerouslySetInnerHTML` or raw DOM injection methods.
+  - All attributes must be properly quoted in templates.
+- **No Hardcoded Secrets:**
+  - Secrets, credentials, or custom API ports must be read from environment variables or `propfundsettings.json`.
+  - ephemereal fallbacks for local test runs should log warnings.
+- **Path Sanitization:**
+  - Never trust raw user inputs in file or path operations. Always sanitize inputs using `path.basename()` or `os.path.basename()` to strip directory traversal sequences (`../`).

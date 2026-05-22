@@ -10,9 +10,33 @@ services:
       # Link the startup script directly so edits on the host apply instantly
       - ./mt5/start_cluster.sh:/root/start_cluster.sh
       # Mount your host scripts folder inside the container
-      - /pjt_src/stockai/mt5code:/root/scripts
+      - ./scripts:/root/scripts
     ports:
       - "127.0.0.1:58801-58810:58801-58810" # Mapped ports for your 10 custom HTTP Python scripts
       - "127.0.0.1:8080:8080" # Secure noVNC Port
       - "127.0.0.1:5900:5900"
     restart: always
+
+  trading-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    network_mode: "host" # High-speed zero-latency local communication with MT5 python bridges
+    volumes:
+      # Mount host scripts folder to feed config settings dynamically
+      - ./scripts:/app/scripts
+    restart: always
+
+  trading-frontend:
+    build:
+      context: ./ui
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:3000:3000" # Expose Next.js frontend strictly on secure localhost
+    environment:
+      - WATCHPACK_POLLING=true # Guarantees hot module reload inside docker mounts
+    volumes:
+      - ./ui:/app
+      - /app/node_modules # Protect container-installed packages
+    restart: always
+

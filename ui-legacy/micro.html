@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Micro Trade Panel (WS)</title>
+    <link rel="manifest" href="/prop/manifest.json">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet"
+        integrity="sha384-T3c6CoIi6uLrA9TneNEoa7RxnatzjcDSCmG1MXxSR1GAsXEV/Dwwykc2MPK8M2HN" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <style>
+        html {
+            height: 100%;
+            box-sizing: border-box;
+        }
+        *, *:before, *:after {
+            box-sizing: inherit;
+        }
+
+        body {
+            padding: 0.5rem;
+            background-color: #f8f9fa;
+            
+            min-width: 50px !important; /* Emphasize this hint to the browser */
+            min-height: 50px !important;
+            max-width: 1000px;
+            max-height: 1000px;
+            
+            height: 100%; 
+            overflow: hidden; /* Body does not scroll; children manage their own scroll */
+
+            display: flex;
+            flex-direction: column;
+        }
+
+        .panel-container {
+            display: flex;
+            align-items: center; 
+            gap: 0.6rem; /* [MODIFICATION] Increased from 0.5rem for more spacing */
+            flex-wrap: nowrap;
+            overflow-x: auto;   /* Horizontal scroll enabled */
+            overflow-y: hidden; /* No vertical scroll for the panel itself */
+            margin-bottom: 0.5rem;
+            width: 100%;       
+            flex-shrink: 0;     
+            min-width: 0; /* Allows panel to be narrower than sum of children's min-content */
+
+            /* MODIFICATION: Scrollbar Styling */
+            scrollbar-width: thin; /* For Firefox & other supporting browsers */
+            scrollbar-color: rgba(0,0,0,0.2) transparent; /* thumb track for Firefox */
+        }
+
+        /* MODIFICATION: WebKit-specific overlay scrollbar styling */
+        .panel-container::-webkit-scrollbar {
+            height: 6px; /* Make horizontal scrollbar thinner */
+        }
+        .panel-container::-webkit-scrollbar-track {
+            background: transparent; /* Makes track invisible, creating overlay effect */
+        }
+        .panel-container::-webkit-scrollbar-thumb {
+            background-color: rgba(0,0,0,0.3); /* Semi-transparent thumb */
+            border-radius: 3px;
+        }
+        .panel-container::-webkit-scrollbar-thumb:hover {
+            background-color: rgba(0,0,0,0.5);
+        }
+
+
+        #symbolInput { width: 120px; flex-shrink: 0;}
+        #trade-qty { width: 70px; flex-shrink: 0;}
+        .btn { flex-shrink: 0; }
+
+        .pnl-display-wrapper {
+            margin-left: auto; 
+            display: flex;     
+            align-items: center;
+            flex-shrink: 0;   
+            min-width: fit-content; 
+        }
+
+        #ws-status-badge {
+            font-size: 0.7rem;
+            margin-right: 5px; 
+            flex-shrink: 0;
+        }
+        #total-unrealized-pnl {
+            font-weight: bold;
+            white-space: nowrap; 
+            flex-shrink: 0; 
+        }
+
+
+        .status-message {
+            font-size: 0.8rem;
+            color: #6c757d;
+            height: 1.5em; 
+            line-height: 1.5em; 
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis; 
+            text-align: center;
+            margin-top: auto; 
+            width: 100%;      
+            flex-shrink: 0;   
+        }
+
+        @keyframes flicker {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.75; }
+        }
+        .flicker { animation: flicker 0.5s ease-in-out; }
+
+        .pnl-positive { color: #198754; }
+        .pnl-negative { color: #dc3545; }
+
+        .status-connecting { background-color: #ffc107; color: #000;}
+        .status-connected { background-color: #198754; color: white;}
+        .status-disconnected { background-color: #6c757d; color: white;}
+        .status-error { background-color: #dc3545; color: white;}
+
+        /* Hide number input spinners */
+        input[type=number]::-webkit-inner-spin-button,
+        input[type=number]::-webkit-outer-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        input[type=number] {
+            -moz-appearance: textfield; /* Firefox */
+        }
+    </style>
+</head>
+<body>
+    <div class="panel-container"> 
+        <select class="form-select form-select-sm" id="symbolInput" aria-label="Select Symbol" disabled>
+            <option value="">Symbol</option>
+        </select>
+        <input type="number" class="form-control form-control-sm" id="trade-qty" value="" min="0"
+            placeholder="SL Pips" aria-label="SL Pips" disabled>
+        <button class="btn btn-sm btn-success" id="btn-buy" disabled title="Buy Market (Scaled)"><i class="bi bi-arrow-up"></i></button>
+        <button class="btn btn-sm btn-danger" id="btn-sell" disabled title="Sell Market (Scaled)"><i class="bi bi-arrow-down"></i></button>
+        <button class="btn btn-sm btn-secondary" id="btn-flatten-symbol" disabled title="Flatten Symbol (Scaled)"><i class="bi bi-x"></i></button>
+        <button class="btn btn-sm btn-info" id="btn-move-sl" disabled title="Move SL to Breakeven (Scaled)"><i class="bi bi-shield-check"></i></button>
+        <div class="pnl-display-wrapper" id="status-pnl-container" title="Connection Status | Total Unrealized PNL">
+            <span class="badge status-connecting" id="ws-status-badge">...</span>
+            <span id="total-unrealized-pnl">N/A</span>
+        </div>
+    </div>
+    <div class="status-message" id="status-message-area"> </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL" crossorigin="anonymous"></script>
+    <script>
+        // JS REMAINS THE SAME
+        const symbolInput = document.getElementById('symbolInput');
+        const tradeQtyInput = document.getElementById('trade-qty');
+        const btnBuy = document.getElementById('btn-buy');
+        const btnSell = document.getElementById('btn-sell');
+        const btnFlattenSymbol = document.getElementById('btn-flatten-symbol');
+        const btnMoveSl = document.getElementById('btn-move-sl');
+        const totalUnrealizedPnlSpan = document.getElementById('total-unrealized-pnl');
+        const statusMessageArea = document.getElementById('status-message-area');
+        const wsStatusBadge = document.getElementById('ws-status-badge');
+        const WS_URL = 'ws://localhost:9999'; 
+        const RECONNECT_DELAY_MS = 5000;
+        let websocket = null;
+        let globalSymbolsList = [];
+        let globalSlPips = {};
+        let previousTotalUnrealizedPNL = null;
+        let pendingRequests = {};
+        let reconnectTimer = null;
+        let statusTimeoutId = null;
+        function formatCurrency(value) { return (value !== null && value !== undefined) ? value.toFixed(2) : 'N/A'; }
+        function getPnlClass(value) { if (value === null || value === undefined || value === 0) return ''; return value > 0 ? 'pnl-positive' : 'pnl-negative'; }
+        function generateRequestId() { return crypto.randomUUID(); }
+        function addLog(message) { console.log(`[MicroPanel] ${message}`); }
+        function displayStatus(message, type = 'info', duration = 3000) {
+            if (statusTimeoutId) clearTimeout(statusTimeoutId);
+            statusMessageArea.textContent = message;
+            let textClass = 'muted'; 
+            if (type === 'success') textClass = 'success';
+            else if (type === 'danger') textClass = 'danger';
+            else if (type === 'warning') textClass = 'warning';
+            statusMessageArea.className = `status-message text-${textClass}`;
+            if (duration > 0) {
+                statusTimeoutId = setTimeout(() => {
+                    statusMessageArea.textContent = '\u00A0'; 
+                    statusMessageArea.className = 'status-message text-muted'; 
+                }, duration);
+            }
+        }
+         function updateWsStatus(status, message = null) {
+            let badgeClass = 'status-disconnected';
+            let statusText = 'ERR'; 
+            switch (status) {
+                case 'connecting': badgeClass = 'status-connecting'; statusText = '...'; break;
+                case 'connected': badgeClass = 'status-connected'; statusText = 'OK'; break;
+                case 'error': badgeClass = 'status-error'; statusText = 'ERR'; break;
+                case 'disconnected': default: badgeClass = 'status-disconnected'; statusText = 'OFF'; break;
+            }
+            wsStatusBadge.className = `badge ${badgeClass}`;
+            wsStatusBadge.textContent = statusText;
+            wsStatusBadge.title = message || status.charAt(0).toUpperCase() + status.slice(1);
+             const isConnected = status === 'connected';
+             symbolInput.disabled = !isConnected;
+             tradeQtyInput.disabled = !isConnected;
+             updateActionButtons();
+         }
+        function storeGlobalSymbols(symbols) {
+            if (!symbols || !Array.isArray(symbols)) {
+                addLog("Received invalid symbol list for storage.");
+                symbols = [];
+            }
+            const currentSelection = symbolInput.value;
+            if (JSON.stringify(symbols) !== JSON.stringify(globalSymbolsList)) {
+                addLog(`Updating symbols: ${symbols.join(', ')}`);
+                globalSymbolsList = symbols;
+                symbolInput.innerHTML = '<option value="">Symbol</option>';
+                symbols.forEach(sym => {
+                    const option = document.createElement('option');
+                    option.value = sym;
+                    option.textContent = sym;
+                    symbolInput.appendChild(option);
+                });
+                if (globalSymbolsList.includes(currentSelection)) {
+                    symbolInput.value = currentSelection;
+                } else {
+                    symbolInput.value = "";
+                }
+            }
+            updateActionButtons();
+        }
+        function isSymbolInputValidAndSelected() {
+            return !!symbolInput.value;
+        }
+        function updateActionButtons() {
+            const isConnected = websocket && websocket.readyState === WebSocket.OPEN;
+            const symbolEntered = isSymbolInputValidAndSelected();
+            const qtyValid = parseFloat(tradeQtyInput.value) > 0;
+            btnBuy.disabled = !isConnected || !symbolEntered || !qtyValid;
+            btnSell.disabled = !isConnected || !symbolEntered || !qtyValid;
+            btnFlattenSymbol.disabled = !isConnected || !symbolEntered;
+            btnMoveSl.disabled = !isConnected || !symbolEntered;
+        }
+        function updateTotalPNL(totalPNL) {
+            let pnlValueText = formatCurrency(totalPNL);
+            let pnlClass = getPnlClass(totalPNL);
+            if (previousTotalUnrealizedPNL !== null && Math.abs(previousTotalUnrealizedPNL - totalPNL) > 0.001) {
+                totalUnrealizedPnlSpan.innerHTML = `<span class="flicker">${pnlValueText}</span>`;
+            } else {
+                 totalUnrealizedPnlSpan.textContent = pnlValueText;
+            }
+            totalUnrealizedPnlSpan.className = pnlClass; 
+            previousTotalUnrealizedPNL = totalPNL;
+        }
+        function connectWebSocket() {
+             if (websocket && websocket.readyState === WebSocket.OPEN) { return; }
+            if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+            addLog(`Connecting to ${WS_URL}...`);
+            updateWsStatus('connecting', 'Connecting...');
+            updateTotalPNL(null); 
+            displayStatus('Connecting...', 'info', 0);
+            websocket = new WebSocket(WS_URL);
+            websocket.onopen = () => {
+                addLog("WebSocket connection established.");
+                updateWsStatus('connected', 'Connected');
+                displayStatus('Connected', 'success', 2000); 
+                Object.values(pendingRequests).forEach(p => p.reject('WebSocket reconnected before response received.'));
+                pendingRequests = {};
+                sendWebSocketRequest('get_account_status')
+                    .then(data => {
+                        if (data?.account) {
+                            addLog("Initial account status received.");
+                            updateTotalPNL(data.account.unrealizedPNL);
+                        } else { addLog("Invalid initial account status structure."); }
+                    })
+                    .catch(error => { addLog(`Error getting initial account status: ${error}`); displayStatus(`Error getting status: ${error}`, 'danger'); });
+                sendWebSocketRequest('get_global_symbols')
+                    .then(data => {
+                        if (data?.symbols) {
+                            addLog("Global symbols and SL pips received.");
+                            globalSlPips = data.slpips || {};
+                            storeGlobalSymbols(data.symbols);
+                        } else { addLog("Invalid global symbols structure."); storeGlobalSymbols([]);}
+                    })
+                    .catch(error => { addLog(`Error getting global symbols: ${error}`); displayStatus(`Error getting symbols: ${error}`, 'danger'); storeGlobalSymbols([]); });
+                sendWebSocketRequest('subscribe_account').catch(err => addLog(`Account subscription failed: ${err}`));
+                sendWebSocketRequest('subscribe_logs').catch(err => addLog(`Log subscription failed: ${err}`));
+            };
+            websocket.onmessage = (event) => {
+                try {
+                    const message = JSON.parse(event.data);
+                    if (message.requestId && pendingRequests[message.requestId]) {
+                        const { resolve, reject, timeout } = pendingRequests[message.requestId];
+                        clearTimeout(timeout);
+                        if (message.status === 'ok') {
+                            addLog(`OK response for ReqID: ${message.requestId}`);
+                            if(message.data?.message) {
+                                displayStatus(message.data.message, 'success');
+                            }
+                            resolve(message.data);
+                        } else {
+                            const errorMsg = message.error || 'Unknown server error';
+                            addLog(`ERROR response for ReqID: ${message.requestId} - ${errorMsg}`);
+                            displayStatus(`Error: ${errorMsg}`, 'danger', 5000);
+                            reject(errorMsg);
+                        }
+                        delete pendingRequests[message.requestId];
+                    }
+                    else if (message.type) {
+                        switch (message.type) {
+                            case 'account_update':
+                                if (message.data?.account) {
+                                    addLog(`Received account update push.`);
+                                    updateTotalPNL(message.data.account.unrealizedPNL);
+                                } else { addLog(`Invalid account_update structure.`); }
+                                break;
+                            case 'log_update':
+                                if (message.data?.message) {
+                                    addLog(`Log: ${message.data.message}`);
+                                    const isError = /error|fail|invalid/i.test(message.data.message);
+                                    displayStatus(message.data.message, isError ? 'danger' : 'info', isError ? 5000 : 3000);
+                                } else { addLog(`Invalid log_update structure.`); }
+                                break;
+                            case 'symbols_update': 
+                                if (message.data?.symbols) {
+                                    addLog("Received symbols update push for validation.");
+                                    globalSlPips = message.data.slpips || globalSlPips;
+                                    storeGlobalSymbols(message.data.symbols);
+                                } else { addLog(`Invalid symbols_update structure.`); }
+                                break;
+                            default:
+                                addLog(`Unhandled message type: ${message.type}`);
+                        }
+                    } else {
+                        addLog(`Unrecognized message format: ${event.data}`);
+                    }
+                } catch (error) {
+                    addLog(`Error processing message: ${error}`);
+                    console.error("Failed to parse/process message:", event.data, error);
+                }
+            };
+            websocket.onerror = (event) => {
+                addLog(`WebSocket Error: ${event.type || 'Unknown error'}`);
+                console.error("WebSocket Error:", event);
+                updateWsStatus('error', 'Connection Error');
+                updateTotalPNL(null);
+                displayStatus('Connection Error', 'danger', 0);
+            };
+            websocket.onclose = (event) => {
+                addLog(`WebSocket closed. Code: ${event.code}, Reason: "${event.reason || 'N/A'}"`);
+                updateWsStatus('disconnected', 'Disconnected');
+                updateTotalPNL(null);
+                displayStatus('Disconnected. Reconnecting...', 'warning', 0); 
+                 Object.values(pendingRequests).forEach(p => p.reject('WebSocket closed before response received.'));
+                 pendingRequests = {};
+                if (!reconnectTimer) {
+                    addLog(`Attempting reconnect in ${RECONNECT_DELAY_MS / 1000}s...`);
+                    reconnectTimer = setTimeout(connectWebSocket, RECONNECT_DELAY_MS);
+                }
+            };
+        }
+        function sendWebSocketRequest(command, payload = {}, timeoutMs = 10000) {
+            return new Promise((resolve, reject) => {
+                if (!websocket || websocket.readyState !== WebSocket.OPEN) {
+                     displayStatus('Not connected', 'danger');
+                    return reject('WebSocket is not connected.');
+                }
+                const requestId = generateRequestId();
+                const message = { 
+                                    receiver:"proplink",
+                                    data:{
+                                            requestId: requestId, 
+                                            command: command, 
+                                            payload: payload
+                                        } 
+                                };
+                const timeout = setTimeout(() => {
+                    if (pendingRequests[requestId]) {
+                        addLog(`Request timed out: ${command} (ReqID: ${requestId})`);
+                         displayStatus(`${command} timed out`, 'warning', 5000);
+                        pendingRequests[requestId].reject(`Request timed out after ${timeoutMs / 1000}s`);
+                        delete pendingRequests[requestId];
+                    }
+                }, timeoutMs);
+                pendingRequests[requestId] = { resolve, reject, timeout };
+                try {
+                    const messageString = JSON.stringify(message);
+                    addLog(`Sending ${command}: ${JSON.stringify(payload)}`);
+                     let actionName = command;
+                     if(command === 'trade') actionName = payload.direction;
+                     if(command === 'flatten' && payload.instrument) actionName = `flatten ${payload.instrument}`;
+                     if(command === 'movestoploss') actionName = `Move SL on ${payload.instrument}`;
+                     displayStatus(`Sending ${actionName}...`, 'info', 1500);
+                    websocket.send(messageString);
+                } catch (error) {
+                    addLog(`Error sending WebSocket message: ${error}`);
+                    displayStatus(`Send Error: ${error}`, 'danger', 5000);
+                    clearTimeout(timeout); delete pendingRequests[requestId]; reject(`Failed to send message: ${error}`);
+                }
+            });
+        }
+        function getValidatedSymbol() {
+            const selectedSymbol = symbolInput.value;
+            if (!selectedSymbol) {
+                displayStatus('Please select a symbol.', 'warning');
+                return null;
+            }
+            return selectedSymbol;
+        }
+        function handleTradeAction(direction) {
+            const s = getValidatedSymbol();
+            if (!s) return; 
+            const sl_pips = parseFloat(tradeQtyInput.value);
+            if (!sl_pips || sl_pips <= 0) {
+                 displayStatus('Invalid SL Pips.', 'warning');
+                return;
+            }
+            sendWebSocketRequest('trade', { symbol: s, direction: direction, ordertype: 'market', qty: 0, sl_pips: sl_pips })
+                .catch(err => {});
+        }
+        function handleFlattenAction() {
+            const s = getValidatedSymbol();
+            if (!s) return; 
+            sendWebSocketRequest('flatten', { instrument: s })
+                 .catch(err => {});
+        }
+        
+        function handleMoveSlToBeAction() {
+            const s = getValidatedSymbol();
+            if (!s) return; 
+            sendWebSocketRequest('movestoploss', { instrument: s })
+                 .catch(err => {});
+        }
+
+        symbolInput.addEventListener('change', () => {
+            const symbol = symbolInput.value;
+            if (symbol && globalSlPips[symbol]) {
+                const defaultSl = globalSlPips[symbol];
+                tradeQtyInput.value = defaultSl;
+                tradeQtyInput.min = defaultSl;
+            } else {
+                tradeQtyInput.value = '';
+                tradeQtyInput.min = '0';
+            }
+            updateActionButtons();
+        });
+
+        tradeQtyInput.addEventListener('input', updateActionButtons);
+        tradeQtyInput.addEventListener('change', () => {
+            const symbol = symbolInput.value;
+            if (symbol && globalSlPips[symbol]) {
+                const defaultSl = globalSlPips[symbol];
+                if (parseFloat(tradeQtyInput.value) < defaultSl) {
+                    displayStatus(`SL for ${symbol} must be >= ${defaultSl}`, 'warning');
+                    tradeQtyInput.value = defaultSl;
+                }
+            }
+        });
+
+        btnBuy.addEventListener('click', () => handleTradeAction('buy'));
+        btnSell.addEventListener('click', () => handleTradeAction('sell'));
+        btnFlattenSymbol.addEventListener('click', handleFlattenAction);
+        btnMoveSl.addEventListener('click', handleMoveSlToBeAction);
+        document.addEventListener('DOMContentLoaded', () => {
+            addLog('Micro Panel Initialized.');
+            updateActionButtons(); 
+            connectWebSocket();
+        });
+    </script>
+</body>
+</html>

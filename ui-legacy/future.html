@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trading Cockpit</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        :root{--green-5:#117a4b;--green-4:#148f5a;--green-3:#19ac6e;--green-2:#1dd789;--red-5:#c42935;--red-4:#d63340;--red-3:#e54854;--red-2:#f06a5f;--panel-bg:#f8f9fa;--panel-border:#dee2e6;--body-bg:#e9ecef;--cancel-grey:#6c757d;--flatten-orange:#fd7e14;--status-ok:#198754;--status-conn:#ffc107;--status-err:#dc3545;--status-off:#6c757d}
+        html,body{margin:0;padding:0;height:100%;background-color:var(--panel-bg)}
+        body{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+        .trading-cockpit{min-width:420px;width:100%;height:100%;background-color:var(--panel-bg);border:none;border-radius:0;box-shadow:none;display:flex;flex-direction:column}
+        .cockpit-header{display:flex;justify-content:space-between;align-items:center;padding:.75rem;background-color:#f1f3f5;flex-shrink:0}
+        .cockpit-header .form-select{font-weight:600;font-size:1.2rem;max-width:180px}
+        .status-container{display:flex;align-items:center;gap:.5rem}
+        .status-container .badge{font-size:.75rem;font-weight:700}
+        .status-container #total-unrealized-pnl{font-size:1.1rem;font-weight:700;min-width:90px;text-align:right}
+        .pnl-positive{color:var(--status-ok)}.pnl-negative{color:var(--status-err)}
+        .status-connected{background-color:var(--status-ok)}.status-connecting{background-color:var(--status-conn);color:#000}.status-error{background-color:var(--status-err)}.status-disconnected{background-color:var(--status-off)}
+        .nav-tabs{border-bottom:1px solid var(--panel-border);font-size:.9rem;flex-shrink:0}
+        .nav-tabs .nav-link{color:#495057;font-weight:500;border-radius:0;border-top:none;padding:.6rem}
+        .nav-tabs .nav-link.active{background-color:var(--panel-bg);border-bottom-color:var(--panel-bg)}
+        .tab-content{padding:.75rem;flex-grow:1;overflow-y:auto}
+        .tab-pane h6{font-size:.9rem;font-weight:700;text-align:center;color:#343a40;margin-bottom:1rem;background-color:#e9ecef;padding:.375rem .75rem;border-radius:.25rem;transition: opacity 0.3s ease-in-out;}
+        .actions-table{width:100%;border-collapse:separate;border-spacing:.5rem}
+        .actions-table .btn,.actions-table .form-control{width:100%;height:100%;padding:.6rem .25rem;font-weight:600;font-size:.9rem;border:none;white-space:nowrap}
+        .actions-table .btn-outline{border:2px solid;background:transparent!important}
+        .btn-buy-mkt{background:#1dd789;color:#000}.btn-buy-ask{background:#19ac6e;color:#fff}.btn-buy-mid{background:#148f5a;color:#fff}.btn-buy-bid{background:#117a4b;color:#fff}.btn-buy-offset{border-color:#117a4b;color:#117a4b}.btn-buy-offset:hover{background:#117a4b!important;color:#fff}
+        .btn-sell-mkt{background:#f06a5f;color:#fff}.btn-sell-bid{background:#e54854;color:#fff}.btn-sell-mid{background:#d63340;color:#fff}.btn-sell-ask{background:#c42935;color:#fff}.btn-sell-offset{border-color:#c42935;color:#c42935}.btn-sell-offset:hover{background:#c42935!important;color:#fff}
+        .btn-cancel{background-color:var(--cancel-grey);color:#fff}.btn-flatten{background-color:var(--flatten-orange);color:#fff;font-weight:700}.btn-be{border:2px solid var(--cancel-grey);color:var(--cancel-grey)}.btn-be:hover{background:var(--cancel-grey)!important;color:#fff}
+        .mid-divider td{border-top:2px solid var(--panel-border);border-bottom:2px solid var(--panel-border)}
+        hr.section-divider{margin:1rem 0;border-top:1px solid var(--panel-border)}
+        .sl-tp-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem}
+        .sl-tp-header span{font-weight:700;font-size:.9rem}
+        .manage-table .col-input{width:75px}.manage-table .col-button{width:auto}.manage-table .col-label{width:50px}
+        input[type=number]{-moz-appearance:textfield;text-align:center;border:1px solid #ced4da}
+        input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+        
+        #global-summary-container { font-size: 0.8rem; border-bottom: 1px solid var(--panel-border); background-color: #f1f3f5; display: none; max-height: 120px; overflow-y: auto; }
+        #global-summary-table th, #global-summary-table td { padding: 0.25rem 0.5rem; }
+        #global-summary-table .text-buy { color: #0d6efd; } #global-summary-table .text-sell { color: var(--red-4); }
+    </style>
+</head>
+<body>
+    <div class="trading-cockpit">
+        <div class="cockpit-header">
+            <select class="form-select" id="symbol-selector" aria-label="Select Symbol" disabled><option>Loading...</option></select>
+            <div class="status-container">
+                <span class="badge status-connecting" id="ws-status-badge">...</span>
+                <span id="total-unrealized-pnl">N/A</span>
+            </div>
+        </div>
+
+        <ul class="nav nav-tabs nav-fill" id="cockpit-tabs" role="tablist">
+            <li class="nav-item" role="presentation"><button class="nav-link active" id="entry-tab-btn" data-bs-toggle="tab" data-bs-target="#entry-tab-pane" type="button">Entry</button></li>
+            <li class="nav-item" role="presentation"><button class="nav-link" id="modify-tab-btn" data-bs-toggle="tab" data-bs-target="#modify-tab-pane" type="button">Modify</button></li>
+            <li class="nav-item" role="presentation"><button class="nav-link" id="manage-tab-btn" data-bs-toggle="tab" data-bs-target="#manage-tab-pane" type="button">Manage</button></li>
+        </ul>
+
+        <div id="global-summary-container">
+            <table class="table table-sm table-borderless mb-0" id="global-summary-table">
+                <tbody id="global-summary-body"></tbody>
+            </table>
+        </div>
+
+        <div class="tab-content" id="myTabContent">
+            <div class="tab-pane fade show active" id="entry-tab-pane" role="tabpanel"> <div style="display: flex; align-items: center; justify-content: space-between; padding: 0 0.5rem 0.5rem 0.5rem;"><span class="fs-6 fw-normal text-muted">Initial Stop Loss</span><div class="input-group input-group-sm" style="max-width: 110px;"><input type="number" class="form-control" id="entry-sl-pips" value="15"><span class="input-group-text">Pips</span></div></div><table class="actions-table"><colgroup><col class="col-input"><col class="col-button"><col class="col-button"><col class="col-input"></colgroup><tbody><tr><td></td><td><button class="btn btn-buy-mkt" data-action="trade" data-payload='{"direction":"buy","order_type":"market"}'>MKT</button></td><td><button class="btn btn-outline btn-sell-offset" data-action="trade" data-payload='{"direction":"sell","order_type":"offset"}'>Offset</button></td><td><input type="number" class="form-control" id="entry-offset-sell" value="5"></td></tr><tr><td></td><td><button class="btn btn-buy-ask" data-action="trade" data-payload='{"direction":"buy","order_type":"limit_ask"}'>Limit Ask</button></td><td><button class="btn btn-sell-ask" data-action="trade" data-payload='{"direction":"sell","order_type":"join_ask"}'>Join Ask</button></td><td></td></tr><tr class="mid-divider"><td colspan="4"><table class="actions-table" style="border-spacing:0.5rem 0;"><colgroup><col class="col-input"><col class="col-button"><col class="col-button"><col class="col-input"></colgroup><tr><td></td><td><button class="btn btn-buy-mid" data-action="trade" data-payload='{"direction":"buy","order_type":"mid"}'>MID</button></td><td><button class="btn btn-sell-mid" data-action="trade" data-payload='{"direction":"sell","order_type":"mid"}'>MID</button></td><td></td></tr></table></td></tr><tr><td></td><td><button class="btn btn-buy-bid" data-action="trade" data-payload='{"direction":"buy","order_type":"join_bid"}'>Join Bid</button></td><td><button class="btn btn-sell-bid" data-action="trade" data-payload='{"direction":"sell","order_type":"limit_bid"}'>Limit Bid</button></td><td></td></tr><tr><td><input type="number" class="form-control" id="entry-offset-buy" value="5"></td><td><button class="btn btn-outline btn-buy-offset" data-action="trade" data-payload='{"direction":"buy","order_type":"offset"}'>Offset</button></td><td><button class="btn btn-sell-mkt" data-action="trade" data-payload='{"direction":"sell","order_type":"market"}'>MKT</button></td><td></td></tr></tbody></table></div>
+            <div class="tab-pane fade" id="modify-tab-pane" role="tabpanel"><h6 id="modify-header">Modifying Working Order...</h6><table class="actions-table"><colgroup><col class="col-input"><col class="col-button"><col class="col-button"><col class="col-input"></colgroup><tbody><tr><td></td><td><button class="btn btn-buy-mkt" data-action="modify_order" data-payload='{"new_price_type":"market"}'>Move to MKT</button></td><td><button class="btn btn-outline btn-sell-offset" data-action="modify_order" data-payload='{"new_price_type":"offset"}'>Move Offset</button></td><td><input type="number" class="form-control" id="modify-offset-sell" value="5"></td></tr><tr><td></td><td><button class="btn btn-buy-ask" data-action="modify_order" data-payload='{"new_price_type":"ask"}'>Move to Ask</button></td><td><button class="btn btn-sell-ask" data-action="modify_order" data-payload='{"new_price_type":"ask"}'>Move to Ask</button></td><td></td></tr><tr class="mid-divider"><td colspan="4"><table class="actions-table" style="border-spacing:0.5rem 0;"><colgroup><col class="col-input"><col class="col-button"><col class="col-button"><col class="col-input"></colgroup><tr><td></td><td><button class="btn btn-buy-mid" data-action="modify_order" data-payload='{"new_price_type":"mid"}'>Move to Mid</button></td><td><button class="btn btn-sell-mid" data-action="modify_order" data-payload='{"new_price_type":"mid"}'>Move to Mid</button></td><td></td></tr></table></td></tr><tr><td></td><td><button class="btn btn-buy-bid" data-action="modify_order" data-payload='{"new_price_type":"bid"}'>Move to Bid</button></td><td><button class="btn btn-sell-bid" data-action="modify_order" data-payload='{"new_price_type":"bid"}'>Move to Bid</button></td><td></td></tr><tr><td><input type="number" class="form-control" id="modify-offset-buy" value="5"></td><td><button class="btn btn-outline btn-buy-offset" data-action="modify_order" data-payload='{"new_price_type":"offset"}'>Move Offset</button></td><td><button class="btn btn-sell-mkt" data-action="modify_order" data-payload='{"new_price_type":"market"}'>Move to MKT</button></td><td></td></tr><tr><td colspan="4"><button class="btn btn-cancel" data-action="cancel_order">CANCEL Working Order</button></td></tr></tbody></table></div>
+            <div class="tab-pane fade" id="manage-tab-pane" role="tabpanel"><h6 id="manage-header">Managing Position...</h6><div class="d-grid mb-3"><button class="btn btn-flatten" data-action="flatten_position">FLATTEN POSITION MKT</button></div><div class="sl-tp-header"><span class="text-danger">Stop Loss</span><button class="btn btn-sm btn-be" data-action="manage_position_stops" data-payload='{"sl":{"type":"breakeven"}}'>Move to B/E</button></div><table class="actions-table manage-table" style="border-spacing: 0.5rem 0.2rem;"><colgroup><col class="col-input"><col class="col-button"><col class="col-label"></colgroup><tbody><tr><td><input type="number" id="manage-sl-entry-pips" value="10"></td><td><button class="btn btn-sm btn-danger" data-action="manage_position_stops" data-payload='{"sl":{"type":"pips_from_entry"}}'>Set SL from Entry</button></td><td class="small text-muted">Pips</td></tr><tr><td><input type="number" id="manage-sl-mid-pips" value="5"></td><td><button class="btn btn-sm btn-danger" data-action="manage_position_stops" data-payload='{"sl":{"type":"pips_from_mid"}}'>Set SL from Mid</button></td><td class="small text-muted">Pips</td></tr></tbody></table>
+            <!-- THIS IS THE ONLY CHANGE: The table containing the three SL buttons is now hidden -->
+            <table class="actions-table" style="border-spacing: 0.5rem 0.2rem; display: none;"><tr><td><button class="btn btn-sm btn-outline-danger" data-action="manage_position_stops" data-payload='{"sl":{"type":"price_level","value":"bid"}}'>Set SL @ Bid</button></td><td><button class="btn btn-sm btn-outline-danger" data-action="manage_position_stops" data-payload='{"sl":{"type":"price_level","value":"mid"}}'>Set SL @ Mid</button></td><td><button class="btn btn-sm btn-outline-danger" data-action="manage_position_stops" data-payload='{"sl":{"type":"price_level","value":"ask"}}'>Set SL @ Ask</button></td></tr></table>
+            <hr class="section-divider"><div class="sl-tp-header"><span class="text-success">Take Profit</span><button class="btn btn-sm btn-be" data-action="manage_position_stops" data-payload='{"tp":{"type":"breakeven"}}'>Move to B/E</button></div><table class="actions-table manage-table" style="border-spacing: 0.5rem 0.2rem;"><colgroup><col class="col-input"><col class="col-button"><col class="col-label"></colgroup><tbody><tr><td><input type="number" id="manage-tp-entry-pips" value="20"></td><td><button class="btn btn-sm btn-success" data-action="manage_position_stops" data-payload='{"tp":{"type":"pips_from_entry"}}'>Set TP from Entry</button></td><td class="small text-muted">Pips</td></tr><tr><td><input type="number" id="manage-tp-mid-pips" value="10"></td><td><button class="btn btn-sm btn-success" data-action="manage_position_stops" data-payload='{"tp":{"type":"pips_from_mid"}}'>Set TP from Mid</button></td><td class="small text-muted">Pips</td></tr></tbody></table><table class="actions-table" style="border-spacing: 0.5rem 0.2rem;"><tr><td><button class="btn btn-sm btn-outline-success" data-action="manage_position_stops" data-payload='{"tp":{"type":"price_level","value":"bid"}}'>Set TP @ Bid</button></td><td><button class="btn btn-sm btn-outline-success" data-action="manage_position_stops" data-payload='{"tp":{"type":"price_level","value":"mid"}}'>Set TP @ Mid</button></td><td><button class="btn btn-sm btn-outline-success" data-action="manage_position_stops" data-payload='{"tp":{"type":"price_level","value":"ask"}}'>Set TP @ Ask</button></td></tr></table></div>
+        </div>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- STATE & CONFIG ---
+            const WS_URL = 'ws://localhost:9999';
+            const RECONNECT_DELAY_MS = 5000;
+            let websocket = null, reconnectTimer = null, statusTimeout = null;
+            let pendingRequests = {}, instrumentMeta = {}, instrumentState = {}, currentSymbol = null, globalSymbolsList = [];
+            
+            // --- DOM ELEMENTS ---
+            const symbolSelector = document.getElementById('symbol-selector');
+            const wsStatusBadge = document.getElementById('ws-status-badge');
+            const pnlDisplay = document.getElementById('total-unrealized-pnl');
+            const allButtons = document.querySelectorAll('[data-action]');
+            const entrySlPipsInput = document.getElementById('entry-sl-pips');
+            const entryOffsetBuyInput = document.getElementById('entry-offset-buy');
+            const entryOffsetSellInput = document.getElementById('entry-offset-sell');
+            const modifyOffsetBuyInput = document.getElementById('modify-offset-buy');
+            const modifyOffsetSellInput = document.getElementById('modify-offset-sell');
+            const globalSummaryContainer = document.getElementById('global-summary-container');
+            const globalSummaryBody = document.getElementById('global-summary-body');
+            const modifyHeader = document.getElementById('modify-header');
+            const manageHeader = document.getElementById('manage-header');
+
+            // --- API & STATE LOGIC ---
+            function connectWebSocket() { if (websocket && websocket.readyState === WebSocket.OPEN) return; if (reconnectTimer) clearTimeout(reconnectTimer); updateWsStatus('connecting'); websocket = new WebSocket(WS_URL); websocket.onopen = () => { updateWsStatus('connected'); sendWebSocketRequest('get_global_symbols'); sendWebSocketRequest('get_account_status'); sendWebSocketRequest('subscribe_account'); sendWebSocketRequest('subscribe_logs'); }; websocket.onmessage = (event) => { try { const message = JSON.parse(event.data); if (message.requestId && pendingRequests[message.requestId]) { handleResponse(message); } else if (message.type) { handlePush(message); } } catch (error) { console.error('[WS] Error processing message:', error, event.data); } }; websocket.onerror = (event) => { console.error('[WS] WebSocket Error:', event); updateWsStatus('error'); }; websocket.onclose = (event) => { updateWsStatus('disconnected'); reconnectTimer = setTimeout(connectWebSocket, RECONNECT_DELAY_MS); }; }
+            function sendWebSocketRequest(command, payload = {}) { return new Promise((resolve, reject) => { if (!websocket || websocket.readyState !== WebSocket.OPEN) return reject('WebSocket is not connected.'); const requestId = crypto.randomUUID(); const message = { receiver: "proplink", data: { requestId, command, payload } }; const timeout = setTimeout(() => { if (pendingRequests[requestId]) { pendingRequests[requestId].reject(`Request timed out`); delete pendingRequests[requestId]; } }, 10000); pendingRequests[requestId] = { resolve, reject, timeout }; websocket.send(JSON.stringify(message)); }); }
+            function handleResponse(message) { const { resolve, reject, timeout } = pendingRequests[message.requestId]; clearTimeout(timeout); if (message.status === 'ok') { if (message.data?.account) handleAccountData(message.data.account); if (message.data?.symbols) populateInstrumentSelector(message.data.symbols, message.data.slpips); resolve(message.data); } else { reject(message.error || 'Unknown server error'); } delete pendingRequests[message.requestId]; }
+            function handlePush(message) { switch (message.type) { case 'account_update': if (message.data?.account) handleAccountData(message.data.account); break; case 'symbols_update': if (message.data?.symbols) populateInstrumentSelector(message.data.symbols, message.data.slpips); break; case 'log_update': if (message.data?.message) displayStatusMessage(message.data.message); break; } }
+            function handleAccountData(accountData) { updatePnl(accountData.unrealizedPNL); renderGlobalSummary(accountData); deriveInstrumentStates(accountData); renderUIForSymbol(); }
+            function deriveInstrumentStates(accountData) {
+                instrumentState = {};
+                globalSymbolsList.forEach(cleanSymbol => {
+                    const pos = accountData.positions.find(p => p.symbol.startsWith(cleanSymbol));
+                    const ord = accountData.orders.find(o => o.symbol.startsWith(cleanSymbol));
+                    instrumentState[cleanSymbol] = {
+                        position: pos ? { side: pos.direction.toLowerCase(), quantity: pos.quantity, entry_price: pos.avgPrice } : null,
+                        working_order: ord ? { side: ord.direction.toLowerCase(), quantity: ord.quantity, limit_price: ord.price } : null
+                    };
+                });
+            }
+            
+            // --- UI RENDERING LOGIC ---
+            function renderGlobalSummary(accountData) {
+                globalSummaryBody.innerHTML = '';
+                const hasPositions = accountData.positions?.length > 0;
+                const hasOrders = accountData.orders?.length > 0;
+                if (!hasPositions && !hasOrders) { globalSummaryContainer.style.display = 'none'; return; }
+                globalSummaryContainer.style.display = 'block';
+                if (hasPositions) { accountData.positions.forEach(p => { const row = globalSummaryBody.insertRow(); const dirClass = p.direction.toLowerCase() === 'buy' ? 'text-buy' : 'text-sell'; row.innerHTML = `<td><strong>${p.symbol}</strong></td><td class="${dirClass} fw-bold">${p.direction} ${p.quantity}</td><td>@ ${p.avgPrice.toFixed(5)}</td><td class="${p.pnl >= 0 ? 'pnl-positive' : 'pnl-negative'}">${p.pnl.toFixed(2)}</td>`; }); }
+                if (hasOrders) { accountData.orders.forEach(o => { const row = globalSummaryBody.insertRow(); row.classList.add('text-muted'); const dirClass = o.direction.toLowerCase() === 'buy' ? 'text-buy' : 'text-sell'; row.innerHTML = `<td>${o.symbol}</td><td class="${dirClass}">${o.direction} ${o.quantity}</td><td colspan="2">${o.orderType} @ ${o.price.toFixed(5)}</td>`; }); }
+            }
+            
+            function renderUIForSymbol() {
+                const meta = instrumentMeta[currentSymbol];
+                if (!currentSymbol) {
+                    document.querySelectorAll('.tab-pane button, .tab-pane input').forEach(el => el.disabled = true);
+                    if(meta) entrySlPipsInput.value = meta.default_sl_pips;
+                    modifyHeader.textContent = 'Modifying Working Order...';
+                    manageHeader.textContent = 'Managing Position...';
+                    return;
+                }
+                const state = instrumentState[currentSymbol] || { position: null, working_order: null };
+                modifyHeader.textContent = state.working_order ? `Modifying: ${state.working_order.side.toUpperCase()} ${state.working_order.quantity} @ ${state.working_order.limit_price}` : 'Modifying Working Order...';
+                manageHeader.textContent = state.position ? `Managing: ${state.position.side.toUpperCase()} ${state.position.quantity} @ ${state.position.entry_price}` : 'Managing Position...';
+                document.querySelectorAll('.tab-pane button, .tab-pane input').forEach(el => el.disabled = false);
+                if (meta) entrySlPipsInput.value = meta.default_sl_pips;
+                const activeDirection = state.working_order?.side || state.position?.side;
+                if (activeDirection) {
+                    const oppositeSide = activeDirection === 'buy' ? 'sell' : 'buy';
+                    document.querySelectorAll(`#modify-tab-pane [class*="btn-${oppositeSide}"]`).forEach(el => { el.disabled = true; });
+                    document.getElementById(oppositeSide === 'buy' ? 'modify-offset-buy' : 'modify-offset-sell').disabled = true;
+                }
+            }
+            
+            function populateInstrumentSelector(symbols, slpips = {}) {
+                globalSymbolsList = symbols;
+                const currentSelection = symbolSelector.value;
+                symbolSelector.innerHTML = '';
+                const placeholder = document.createElement('option');
+                placeholder.value = "";
+                placeholder.textContent = "Select Symbol";
+                symbolSelector.appendChild(placeholder);
+                instrumentMeta = {};
+                symbols.forEach(s => { const o = document.createElement('option'); o.value = s; o.textContent = s; symbolSelector.appendChild(o); instrumentMeta[s] = { symbol: s, default_sl_pips: slpips[s] || 10 }; });
+                if (symbols.includes(currentSelection)) { symbolSelector.value = currentSelection; } 
+                else { symbolSelector.value = ""; }
+                currentSymbol = symbolSelector.value;
+                renderUIForSymbol();
+            }
+
+            // --- EVENT LISTENERS ---
+            symbolSelector.addEventListener('change', () => { currentSymbol = symbolSelector.value; renderUIForSymbol(); });
+            
+            allButtons.forEach(button => {
+                button.addEventListener('click', () => {
+                    const command = button.dataset.action; if (!command) return;
+                    let payload = JSON.parse(button.dataset.payload || '{}');
+                    payload.symbol = currentSymbol;
+                    if (!payload.symbol) { console.error("No symbol selected for action."); return; }
+                    if (command === 'trade') { payload.initial_sl_pips = parseFloat(entrySlPipsInput.value); if (payload.order_type === 'offset') payload.offset_pips = parseFloat(payload.direction === 'buy' ? entryOffsetBuyInput.value : entryOffsetSellInput.value); } 
+                    else if (command === 'modify_order' && payload.new_price_type === 'offset') {
+                        const side = (instrumentState[currentSymbol]?.working_order?.side || instrumentState[currentSymbol]?.position?.side);
+                        if (side === 'buy') { payload.offset_pips = parseFloat(modifyOffsetBuyInput.value); } 
+                        else if (side === 'sell') { payload.offset_pips = parseFloat(modifyOffsetSellInput.value); }
+                    } 
+                    else if (command === 'manage_position_stops') {
+                        if (payload.sl?.type === 'pips_from_entry') payload.sl.value = parseFloat(document.getElementById('manage-sl-entry-pips').value);
+                        if (payload.sl?.type === 'pips_from_mid') payload.sl.value = parseFloat(document.getElementById('manage-sl-mid-pips').value);
+                        if (payload.tp?.type === 'pips_from_entry') payload.tp.value = parseFloat(document.getElementById('manage-tp-entry-pips').value);
+                        if (payload.tp?.type === 'pips_from_mid') payload.tp.value = parseFloat(document.getElementById('manage-tp-mid-pips').value);
+                    }
+                    sendWebSocketRequest(command, payload).then(res => console.log(`[RES] OK for ${command}`)).catch(err => console.error(`[RES] ERR for ${command}:`, err));
+                });
+            });
+            
+            updateWsStatus = (status) => { let b='status-disconnected',t='OFF'; switch(status){case 'connecting':b='status-connecting';t='...';break;case 'connected':b='status-connected';t='OK';break;case 'error':b='status-error';t='ERR';break;} wsStatusBadge.className=`badge ${b}`;wsStatusBadge.textContent=t;symbolSelector.disabled=status!=='connected';};
+            updatePnl = (pnl) => { if(pnl!=null){pnlDisplay.textContent=(pnl>=0?'+':'')+pnl.toFixed(2);pnlDisplay.className=pnl>=0?'pnl-positive':'pnl-negative';}else{pnlDisplay.textContent='N/A';pnlDisplay.className='';}};
+            displayStatusMessage = (message, duration = 3000) => { const h=document.querySelector('.tab-pane.active h6'); if(!h)return; if(statusTimeout)clearTimeout(statusTimeout); const oT=h.textContent; h.style.opacity='0'; setTimeout(()=>{h.textContent=message;h.style.opacity='1';},300); statusTimeout=setTimeout(()=>{h.style.opacity='0';setTimeout(()=>{h.textContent=oT;h.style.opacity='1';},300);},duration);};
+            
+            connectWebSocket();
+        });
+    </script>
+</body>
+</html>

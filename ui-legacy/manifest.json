@@ -1,0 +1,22 @@
+{
+    "name": "Micro Trade Panel",
+    "short_name": "MicroTrade",
+    "description": "Minimal panel for quick trading actions.",
+    "start_url": "/prop/micro.html",
+    "display_override": ["window-controls-overlay", "minimal-ui", "standalone"],  
+    "display": "standalone",  
+    "background_color": "#f8f9fa",
+    "theme_color": "#ffffff",
+    "icons": [
+        {
+            "src": "/prop/icon-1923.png",
+            "sizes": "144x144",  
+            "type": "image/png"
+        },
+        {
+            "src": "/prop/icon-5123.png",
+            "sizes": "144x144",  
+            "type": "image/png"
+        }
+    ]
+}

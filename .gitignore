@@ -1,0 +1,84 @@
+# ==============================================================================
+# Prop Firm Trading Farm - Central Git Ignore Configuration
+# ==============================================================================
+
+# --- System-Specific Executables & Large Installers ---
+/mt5setup.exe
+mt5setup.exe
+*.exe
+
+# --- macOS & Windows OS Junk ---
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# --- IDEs / Editors Workspace Settings ---
+.vscode/
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# --- Node.js / React / Next.js (Frontend - ui/) ---
+ui/node_modules/
+ui/.next/
+ui/out/
+ui/build/
+ui/npm-debug.log*
+ui/yarn-debug.log*
+ui/yarn-error.log*
+ui/.pnp
+ui/.pnp.js
+
+# --- Python compilation & virtual envs (Backend & scripts/) ---
+__pycache__/
+*/__pycache__/
+*/*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# --- Virtual Environments ---
+.env
+.venv
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# --- Logs & Performance Dumps ---
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# --- Local Environment Configurations ---
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local

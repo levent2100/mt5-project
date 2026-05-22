@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-Account Overview (WebSocket)</title> <!-- Changed Title -->
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet"
+        integrity="sha384-T3c6CoIi6uLrA9TneNEoa7RxnatzjcDSCmG1MXxSR1GAsXEV/Dwwykc2MPK8M2HN" crossorigin="anonymous">
+    <!-- Optional: Add Bootstrap Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <style>
+        /* Custom Styles (Same as before) */
+        body {
+            padding-top: 1rem;
+            background-color: #f8f9fa;
+        }
+
+        .cards-column-container {
+            max-width: 900px; /* Adjust max-width as needed */
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .account-card {
+            margin-bottom: 1rem;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, .1);
+        }
+
+        .table-sm th,
+        .table-sm td {
+            padding: 0.4rem;
+            font-size: 0.85rem;
+            vertical-align: middle;
+        }
+
+        .status-connected { border-left: 5px solid #198754; } /* Green */
+        .status-disconnected { border-left: 5px solid #ffc107; } /* Yellow/Orange */
+        .status-error { border-left: 5px solid #dc3545; } /* Red */
+        /* Add connecting status maybe? */
+        .status-connecting { border-left: 5px solid #0dcaf0; } /* Cyan */
+
+
+        .pnl-positive { color: #198754; font-weight: 500; }
+        .pnl-negative { color: #dc3545; font-weight: 500; }
+
+        .card-header {
+            font-weight: bold;
+            background-color: #e9ecef;
+            border-bottom: 1px solid #dee2e6;
+        }
+
+        .position-buy { color: #0d6efd; font-weight: 500; }
+        .position-sell { color: #dc3545; font-weight: 500; }
+
+        @keyframes flicker {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.75; }
+        }
+        .flicker { animation: flicker 0.5s ease-in-out; }
+
+        .small-text { font-size: 0.8rem; }
+
+        .table-responsive {
+            max-height: 150px;
+            overflow-y: auto;
+        }
+
+        /* Connection Status Styles (Copied from single.html) */
+        #ws-status .badge { vertical-align: middle; }
+        .status-connecting { background-color: #ffc107; color: #000;} /* Orange */
+        .status-connected { background-color: #ffffff;} /* Green */
+        .status-connected-badge { background-color: #198754; } /* Green */
+        .status-disconnected { background-color: #6c757d;} /* Grey */
+        .status-error { background-color: #dc3545;} /* Red */
+
+        /* Dedicated Log Area */
+         #log-section {
+            margin-top: 2rem;
+            max-width: 900px; /* Match cards container width */
+            margin-left: auto;
+            margin-right: auto;
+         }
+         #log-output {
+            height: 150px;
+            font-size: 0.8rem;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            background-color: #e9ecef;
+            border: 1px solid #ced4da;
+         }
+
+    </style>
+</head>
+
+<body>
+    <div class="container-fluid"> <!-- Use fluid for full width potential -->
+        <div class="d-flex justify-content-between align-items-center mb-4 px-md-3"> <!-- Add padding -->
+            <h1 class="mb-0">Trading Account Overview</h1>
+            <div class="text-end d-flex align-items-center">
+                <!-- WebSocket Status -->
+                <span id="ws-status" class="me-3"><span class="badge status-connecting">Connecting...</span></span>
+                <small class="text-muted me-2">Last Update: <span id="last-updated" class="fw-bold">Never</span></small>
+                <button class="btn btn-sm btn-outline-secondary ms-2" id="refresh-now" title="Request Manual Refresh" disabled>
+                    <i class="bi bi-arrow-clockwise"></i>
+                </button>
+            </div>
+        </div>
+
+        <div id="alert-container" class="px-md-3"></div> <!-- Add padding -->
+
+        <!-- Centering Container for the vertical column -->
+        <div class="cards-column-container">
+            <div id="account-cards-container">
+                <!-- Initial Loading Indicator -->
+                <div class="col-12 text-center" id="loading-indicator">
+                    <div class="spinner-border text-primary" role="status"> <span
+                            class="visually-hidden">Loading...</span> </div>
+                    <p class="mt-2">Waiting for WebSocket connection...</p>
+                </div>
+                <!-- Account cards will be loaded here vertically -->
+            </div>
+        </div>
+
+        <!-- Logs Section (Optional but useful) -->
+        <div id="log-section">
+             <div class="d-flex justify-content-between align-items-center mb-2">
+                 <h6 class="mb-0">Logs / Status</h6>
+                 <button class="btn btn-sm btn-outline-secondary" id="clear-log" title="Clear Log"><i
+                         class="bi bi-eraser"></i></button>
+             </div>
+             <textarea class="form-control" id="log-output" rows="5" readonly>Initializing...</textarea>
+         </div>
+
+    </div>
+
+    <!-- Bootstrap JS Bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"
+        integrity="sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL"
+        crossorigin="anonymous"></script>
+
+    <script>
+        // --- DOM Elements ---
+        const accountsContainer = document.getElementById('account-cards-container');
+        const lastUpdatedSpan = document.getElementById('last-updated');
+        let loadingIndicator = document.getElementById('loading-indicator');
+        const refreshButton = document.getElementById('refresh-now');
+        const alertContainer = document.getElementById('alert-container');
+        const wsStatusSpan = document.getElementById('ws-status');
+        const logOutput = document.getElementById('log-output'); // Log elements
+        const clearLogButton = document.getElementById('clear-log');
+
+        // --- State & Config ---
+        const WS_URL = 'ws://localhost:9999'; // Same WS endpoint
+        const RECONNECT_DELAY_MS = 5000;
+        let websocket = null;
+        let previousData = {}; // Stores state { accountId: accountData } for flicker effect
+        let pendingRequests = {}; // { requestId: { resolve, reject, timeout } }
+        let reconnectTimer = null;
+
+        // --- Utility Functions --- (Copied from single.html, added logging)
+        function formatCurrency(value) { return (value !== null && value !== undefined) ? value.toFixed(2) + '$' : 'N/A'; }
+        function formatNumber(value, decimals = 2) { return (value !== null && value !== undefined) ? value.toFixed(decimals) : 'N/A'; }
+        function getPnlClass(value) { if (value === null || value === undefined || value === 0) return ''; return value > 0 ? 'pnl-positive' : 'pnl-negative'; }
+        function getPositionDirectionClass(direction) { return direction === 'BUY' ? 'position-buy' : 'position-sell'; }
+        function addLog(message, source = "FE") { const ts = new Date().toLocaleTimeString(); logOutput.value = `[${ts}][${source}] ${message}\n${logOutput.value}`; const l = logOutput.value.split('\n'); if (l.length > 100) logOutput.value = l.slice(0, 100).join('\n'); }
+        function displayGlobalAlert(message, type = 'danger', duration = 5000) {
+            const alertId = `alert-${Date.now()}`; // Unique ID for timeout
+            const alertHtml = `<div id="${alertId}" class="alert alert-${type} alert-dismissible fade show" role="alert">${message}<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button></div>`;
+            alertContainer.insertAdjacentHTML('beforeend', alertHtml); // Append new alerts
+             // Auto-dismiss (except maybe for errors?)
+            if (duration > 0) { setTimeout(() => { const alertElement = document.getElementById(alertId); if (alertElement) { bootstrap.Alert.getOrCreateInstance(alertElement).close(); } }, duration); }
+        }
+        function clearGlobalAlert() { alertContainer.innerHTML = ''; }
+        function generateRequestId() { return crypto.randomUUID(); }
+
+        // --- UI Update Functions ---
+         function updateWsStatus(status, message) {
+            let badgeClass = 'status-disconnected';
+            let statusText = message || 'Disconnected';
+
+            switch (status) {
+                case 'connecting': badgeClass = 'status-connecting'; statusText = message || 'Connecting...'; break;
+                case 'connected': badgeClass = 'status-connected-badge'; statusText = message || 'Connected'; break;
+                case 'error': badgeClass = 'status-error'; statusText = message || 'Error'; break;
+                case 'disconnected': default: badgeClass = 'status-disconnected'; statusText = message || 'Disconnected'; break;
+            }
+            wsStatusSpan.innerHTML = `<span class="badge ${badgeClass}">${statusText}</span>`;
+            // Also enable/disable refresh button based on connection
+            refreshButton.disabled = status !== 'connected';
+         }
+
+        // --- UI Creation Function (Mostly same as before) ---
+        function createAccountCard(account) {
+            const card = document.createElement('div');
+            // Determine status class, default to disconnected if null/undefined
+            const statusClass = `status-${(account.status || 'disconnected').toLowerCase()}`;
+            card.className = `card account-card ${statusClass}`;
+            card.dataset.accountId = account.id;
+
+            const prevAcc = previousData[account.id];
+
+            
+            let LastUpdatedHtml = `<span class="">${account.lastUpdated}</span>`;
+
+            nfObject = new Intl.NumberFormat('en-US');            
+            let CashValueHtml = `<span class="">${nfObject.format(account.cash_value)}</span>`;
+            
+            // PNL with flicker effect
+            let realizedPNLHtml = `<span class="${getPnlClass(account.realizedPNL)}">${formatCurrency(account.realizedPNL)}</span>`;
+            let unrealizedPNLHtml = `<span class="${getPnlClass(account.unrealizedPNL)}">${formatCurrency(account.unrealizedPNL)}</span>`;
+            if (prevAcc && prevAcc.unrealizedPNL !== account.unrealizedPNL) { unrealizedPNLHtml = `<span class="flicker ${getPnlClass(account.unrealizedPNL)}">${formatCurrency(account.unrealizedPNL)}</span>`; }
+            if (prevAcc && prevAcc.realizedPNL !== account.realizedPNL) { realizedPNLHtml = `<span class="flicker ${getPnlClass(account.realizedPNL)}">${formatCurrency(account.realizedPNL)}</span>`; }
+
+            // Positions Table
+            let positionsTable = '<p class="text-muted small my-1 px-2">No open positions.</p>';
+            if (account.positions && account.positions.length > 0) {
+                positionsTable = `<div class="table-responsive"><table class="table table-sm table-borderless mb-1 small-text"><thead><tr><th>Symbol</th><th>Dir</th><th>Qty</th><th>Avg Price</th><th>PNL</th></tr></thead><tbody>`;
+                account.positions.forEach(p => { const qD = Math.abs(p.quantity || 0) % 1 !== 0 ? 2 : 0; const pD = p.avgPrice > 10 ? 2 : (p.avgPrice < 0.1 ? 5 : 4); positionsTable += `<tr><td>${p.displaySymbol || p.symbol}</td><td class="${getPositionDirectionClass(p.direction)}">${p.direction}</td><td>${formatNumber(Math.abs(p.quantity || 0), qD)}</td><td>${formatNumber(p.avgPrice, pD)}</td><td class="${getPnlClass(p.pnl)}">${formatCurrency(p.pnl)}</td></tr>`; });
+                positionsTable += '</tbody></table></div>';
+            }
+
+            // Orders Table
+            let ordersTable = '<p class="text-muted small my-1 px-2">No pending orders.</p>';
+            if (account.orders && account.orders.length > 0) {
+                ordersTable = `<div class="table-responsive"><table class="table table-sm table-borderless mb-1 small-text"><thead><tr><th>Symbol</th><th>Dir</th><th>Qty</th><th>Type</th><th>Price</th></tr></thead><tbody>`;
+                account.orders.forEach(o => { const qD = o.quantity % 1 !== 0 ? 2 : 0; const pD = o.price > 10 ? 2 : (o.price < 0.1 ? 5 : 4); ordersTable += `<tr><td>${o.displaySymbol || o.symbol}</td><td class="${getPositionDirectionClass(o.direction)}">${o.direction}</td><td>${formatNumber(o.quantity, qD)}</td><td>${o.orderType || 'N/A'}</td><td>${formatNumber(o.price, pD)}</td></tr>`; });
+                ordersTable += '</tbody></table></div>';
+            }
+
+            // Error Info
+            let errorInfo = '';
+            if (account.status === 'Error' && account.error) { errorInfo = `<div class="alert alert-danger alert-sm p-1 mt-1 small mx-2" role="alert">${account.error}</div>`; }
+
+            // Card Header Status Badge
+            let statusBadgeClass = 'warning'; // Default for disconnected/unknown
+            if (account.status === 'Connected') statusBadgeClass = 'success';
+            else if (account.status === 'Error') statusBadgeClass = 'danger';
+
+            let enabledBadgeClass = 'warning'; // Default for disconnected/unknown
+            let isEnabled = 'UNKNOWN';
+            if (account.enabled === true) { enabledBadgeClass = 'success'; isEnabled = 'ENABLED';}
+            else { enabledBadgeClass = 'danger'; isEnabled = 'DISABLED';}
+
+             card.innerHTML = `
+                <div class="card-header">
+                    ${account.displayName || account.id}
+                    <span class="badge bg-${enabledBadgeClass} float-end ms-2">${isEnabled}</span>
+                    <span class="badge bg-${statusBadgeClass} float-end ms-2">${account.status || 'Unknown'}</span>
+                    <span class="badge bg-secondary float-end">${account.type || 'N/A'}</span>
+                </div>
+                <div class="card-body p-0">
+                    <div class="my-2 px-2">
+                        <small>LastUpdated: ${LastUpdatedHtml}</small>
+                    </div>
+                    <div class="my-2 px-2">
+                        <small>Cash_Value: ${CashValueHtml} | Realized: ${realizedPNLHtml} | Unrealized: ${unrealizedPNLHtml}</small>
+                    </div>
+                    <h6 class="card-subtitle mb-1 text-muted small px-2">Positions</h6>
+                    ${positionsTable}
+                    <h6 class="card-subtitle mb-1 mt-2 text-muted small px-2">Pending Orders</h6>
+                    ${ordersTable}
+                    ${errorInfo}
+                </div>`;
+            return card;
+        }
+
+        // --- Process Data (Takes array of accounts) ---
+        function processAccountData(accounts) {
+            if (loadingIndicator) { loadingIndicator.remove(); loadingIndicator = null; }
+
+            const currentAccountIds = new Set();
+            const newAccountData = {};
+
+            if (accounts && Array.isArray(accounts)) {
+                // Sort accounts maybe? (Optional: by name or ID)
+                // accounts.sort((a, b) => (a.displayName || a.id).localeCompare(b.displayName || b.id));
+
+                accountsContainer.innerHTML = ''; // Clear previous cards
+                accounts.forEach(account => {
+                    if (!account || !account.id) {
+                        addLog("Received account data object without ID, skipping.", "WS");
+                        console.warn("Skipping account data without ID:", account);
+                        return; // Skip invalid account entries
+                    }
+                    currentAccountIds.add(account.id);
+                     // Deep clone account data for previous state comparison
+                    newAccountData[account.id] = JSON.parse(JSON.stringify(account));
+                    const accountCardElement = createAccountCard(account);
+                    accountsContainer.appendChild(accountCardElement);
+                });
+
+                if (accounts.length === 0 && websocket && websocket.readyState === WebSocket.OPEN) {
+                    accountsContainer.innerHTML = '<p class="text-center text-muted">No account data received from server.</p>';
+                 } else if (accounts.length === 0) {
+                     // If not connected, keep showing connection message or error
+                 }
+
+            } else {
+                addLog("Invalid account data received (expected array).", "WS")
+                console.error("Invalid account data format received:", accounts);
+                accountsContainer.innerHTML = '<p class="text-danger text-center">Error: Invalid account data format received.</p>';
+            }
+
+            // Update the timestamp (use current time if not provided by server message)
+            // Note: A global 'lastUpdated' might be less useful if accounts update independently.
+            // We'll just use the time the message was processed.
+            lastUpdatedSpan.textContent = new Date().toLocaleString();
+
+            // Update previous data state *after* rendering
+             previousData = newAccountData;
+        }
+
+        // --- WebSocket Functions ---
+        function connectWebSocket() {
+             if (websocket && websocket.readyState === WebSocket.OPEN) {
+                addLog("WebSocket already open.");
+                return;
+            }
+            if (reconnectTimer) {
+                clearTimeout(reconnectTimer);
+                reconnectTimer = null;
+            }
+
+            addLog(`Connecting to ${WS_URL}...`);
+            updateWsStatus('connecting');
+             // Clear old data and show connecting message
+            processAccountData([]); // Clear cards
+            previousData = {}; // Reset previous state
+            if (!loadingIndicator && accountsContainer.innerHTML === '') { // Add loading indicator if needed
+                accountsContainer.innerHTML = `
+                 <div class="col-12 text-center" id="loading-indicator">
+                    <div class="spinner-border text-primary" role="status"> <span class="visually-hidden">Loading...</span> </div>
+                    <p class="mt-2">Connecting to WebSocket...</p>
+                 </div>`;
+                 loadingIndicator = document.getElementById('loading-indicator');
+            } else if(loadingIndicator) {
+                 loadingIndicator.querySelector('p').textContent = 'Connecting to WebSocket...';
+            }
+
+
+            websocket = new WebSocket(WS_URL);
+
+            websocket.onopen = () => {
+                addLog("WebSocket connection established.");
+                updateWsStatus('connected');
+                clearGlobalAlert(); // Clear any previous connection errors
+
+                 // Reject any outstanding requests from previous connection attempt
+                Object.values(pendingRequests).forEach(p => p.reject('WebSocket reconnected before response received.'));
+                pendingRequests = {};
+
+                // Request initial state for MULTI view and subscribe
+                sendWebSocketRequest('get_multi_account_status')
+                    .then(data => {
+                        if (data && Array.isArray(data.accounts)) {
+                            addLog(`Initial multi-account status received (${data.accounts.length} accounts).`, "WS");
+                            processAccountData(data.accounts);
+                        } else {
+                            addLog("Received invalid initial multi-account status structure.", "WS");
+                            displayGlobalAlert("Failed to get initial account statuses: Invalid data format.", "warning");
+                            processAccountData([]); // Show empty state
+                        }
+                    })
+                    .catch(error => {
+                        addLog(`Error getting initial multi-account status: ${error}`, "WS");
+                        displayGlobalAlert(`Error getting initial account statuses: ${error}`, "danger");
+                        processAccountData([]); // Show empty state
+                    });
+
+                // Subscribe to multi-account updates and logs (fire and forget or handle response)
+                sendWebSocketRequest('subscribe_multi_account')
+                    .then(() => addLog("Subscription request for multi-account updates sent.", "FE"))
+                    .catch(err => addLog(`Failed to send multi-account subscription request: ${err}`, "FE"));
+                sendWebSocketRequest('subscribe_logs')
+                    .then(() => addLog("Subscription request for logs sent.", "FE"))
+                    .catch(err => addLog(`Failed to send log subscription request: ${err}`, "FE"));
+            };
+
+            websocket.onmessage = (event) => {
+                try {
+                    const message = JSON.parse(event.data);
+                    // addLog(`Received raw: ${event.data}`, "WS-RAW"); // DEBUG
+
+                    // --- Response to a Request ---
+                    if (message.requestId && pendingRequests[message.requestId]) {
+                        const { resolve, reject, timeout } = pendingRequests[message.requestId];
+                        clearTimeout(timeout);
+
+                        if (message.status === 'ok') {
+                            addLog(`Received OK response for ReqID: ${message.requestId}`, "WS");
+                            resolve(message.data); // Resolve with the data part
+                        } else {
+                            const errorMsg = message.error || 'Unknown error from server';
+                            addLog(`Received ERROR response for ReqID: ${message.requestId} - ${errorMsg}`, "WS");
+                            reject(errorMsg); // Reject with the error message
+                            displayGlobalAlert(`Request Failed: ${errorMsg}`, 'warning');
+                        }
+                        delete pendingRequests[message.requestId];
+                    }
+                    // --- Server-Pushed Update ---
+                    else if (message.type) {
+                        switch (message.type) {
+                            case 'multi_account_update':
+                                if (message.data && Array.isArray(message.data.accounts)) {
+                                     addLog(`Received multi-account update push (${message.data.accounts.length} accounts).`, "WS");
+                                     processAccountData(message.data.accounts);
+                                } else {
+                                     addLog(`Received invalid multi_account_update structure: ${event.data}`, "WS");
+                                }
+                                break;
+                            case 'log_update':
+                                if (message.data && message.data.message) {
+                                     addLog(message.data.message, message.data.source || "BE");
+                                } else {
+                                     addLog(`Received invalid log_update structure: ${event.data}`, "WS");
+                                }
+                                break;
+                            // case 'symbols_update': // Not strictly needed here, but could handle if necessary
+                            //     break;
+                            default:
+                                addLog(`Received unhandled message type: ${message.type}`, "WS");
+                                console.warn("Unhandled WebSocket message:", message);
+                        }
+                    }
+                    // --- Unrecognized Message ---
+                    else {
+                        addLog(`Received unrecognized message format: ${event.data}`, "WS");
+                        console.warn("Unrecognized WebSocket message:", message);
+                    }
+
+                } catch (error) {
+                    addLog(`Error processing WebSocket message: ${error}`, "WS");
+                    console.error("Failed to parse or process WebSocket message:", event.data, error);
+                }
+            };
+
+            websocket.onerror = (event) => {
+                addLog(`WebSocket Error: ${event.type || 'Unknown error'}`, "WS");
+                console.error("WebSocket Error:", event);
+                updateWsStatus('error', 'Connection Error');
+                processAccountData([]); // Clear data on error
+                if (loadingIndicator) loadingIndicator.querySelector('p').textContent = 'WebSocket connection error.';
+                else if (accountsContainer.innerHTML === '') accountsContainer.innerHTML = '<p class="text-center text-danger">WebSocket connection error.</p>';
+
+            };
+
+            websocket.onclose = (event) => {
+                addLog(`WebSocket connection closed. Code: ${event.code}, Reason: "${event.reason || 'No reason given'}"`, "WS");
+                updateWsStatus('disconnected');
+                processAccountData([]); // Clear data on disconnect
+                previousData = {}; // Reset previous state
+                 if (loadingIndicator) loadingIndicator.querySelector('p').textContent = 'WebSocket disconnected. Attempting to reconnect...';
+                 else if (accountsContainer.innerHTML === '') accountsContainer.innerHTML = '<p class="text-center text-muted">WebSocket disconnected. Attempting to reconnect...</p>';
+
+
+                 // Reject any outstanding requests
+                 Object.values(pendingRequests).forEach(p => p.reject('WebSocket closed before response received.'));
+                 pendingRequests = {};
+
+                // Attempt to reconnect after a delay
+                if (!reconnectTimer) {
+                    addLog(`Attempting to reconnect in ${RECONNECT_DELAY_MS / 1000} seconds...`);
+                    reconnectTimer = setTimeout(connectWebSocket, RECONNECT_DELAY_MS);
+                }
+            };
+        }
+
+         // Function to send requests and handle responses via Promises (Same as single.html)
+        function sendWebSocketRequest(command, payload = {}, timeoutMs = 10000) {
+            return new Promise((resolve, reject) => {
+                if (!websocket || websocket.readyState !== WebSocket.OPEN) {
+                    return reject('WebSocket is not connected.');
+                }
+                const requestId = generateRequestId();
+                const message = { 
+                                    receiver:"proplink",
+                                    data: {
+                                            requestId: requestId, 
+                                            command: command, 
+                                            payload: payload
+                                           }
+                                };
+                const timeout = setTimeout(() => {
+                    if (pendingRequests[requestId]) {
+                        addLog(`Request timed out: ${command} (ReqID: ${requestId})`, "FE");
+                        pendingRequests[requestId].reject(`Request timed out after ${timeoutMs / 1000}s`);
+                        delete pendingRequests[requestId];
+                    }
+                }, timeoutMs);
+                pendingRequests[requestId] = { resolve, reject, timeout };
+                try {
+                    const messageString = JSON.stringify(message);
+                    addLog(`Sending ${command}: ${messageString.substring(0, 200)}${messageString.length > 200 ? '...' : ''}`, "FE"); // Avoid logging huge payloads fully
+                    websocket.send(messageString);
+                } catch (error) {
+                    addLog(`Error sending WebSocket message: ${error}`, "FE");
+                    clearTimeout(timeout); delete pendingRequests[requestId]; reject(`Failed to send message: ${error}`);
+                }
+            });
+        }
+
+        // --- Event Listeners ---
+        refreshButton.addEventListener('click', () => {
+             addLog("Manual refresh requested.", "FE");
+             displayGlobalAlert("Requesting refresh...", 'info', true, 2000);
+             sendWebSocketRequest('get_multi_account_status')
+                .then(data => { // Response handler is already inside onmessage
+                    if(data && Array.isArray(data.accounts)) {
+                         // Data processing happens in onmessage, just log success maybe
+                         addLog("Manual refresh successful.", "WS");
+                    } else {
+                        addLog("Manual refresh response invalid.", "WS");
+                        displayGlobalAlert("Refresh failed: Invalid data received.", "warning");
+                    }
+                 })
+                .catch(error => {
+                    addLog(`Manual refresh failed: ${error}`, "WS");
+                    displayGlobalAlert(`Refresh failed: ${error}`, "warning");
+                });
+        });
+
+        clearLogButton.addEventListener('click', () => {
+            logOutput.value = '';
+            addLog("Log cleared.", "FE");
+        });
+
+
+        // --- Initial Load ---
+        document.addEventListener('DOMContentLoaded', () => {
+            addLog('Overview Initialized. Connecting WebSocket...');
+            updateWsStatus('connecting'); // Initial status
+            connectWebSocket(); // Start connection
+        });
+
+    </script>
+</body>
+
+</html>
