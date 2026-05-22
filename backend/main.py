@@ -18,15 +18,12 @@ app = FastAPI(
     version="2.0"
 )
 
-# CORS configuration to block unauthorized external pages and secure the local loopback channel
+# CORS configuration to support arbitrary forwarded ports and local connections in development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://127.0.0.1:3000", 
-        "http://localhost:3000"
-    ],
+    allow_origin_regex=".*",
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 

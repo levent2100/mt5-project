@@ -78,6 +78,25 @@ echo "5. Starting MT5 instances..."
 
 # Instance 1 (Active by default)
 if [ -f "/config/.wine/drive_c/Program Files/MetaTrader 5_1/terminal64.exe" ]; then
+    echo "Configuring terminal.ini options to enable Algo Trading..."
+    python3 -c "
+path = '/config/.wine/drive_c/Program Files/MetaTrader 5_1/Config/terminal.ini'
+import os
+if os.path.exists(path):
+    with open(path, 'r', encoding='utf-16') as f:
+        content = f.read()
+    target = '[Options]'
+    replacement = '[Options]\r\nExpertEnable=1\r\nExpertInputs=1\r\nExpertImport=1\r\nExpertConfirm=0\r\n'
+    if target in content:
+        content = content.replace(target, replacement)
+    else:
+        content += '\r\n' + replacement
+    with open(path, 'w', encoding='utf-16') as f:
+        f.write(content)
+    print('Updated terminal.ini successfully!')
+else:
+    print('terminal.ini not found, skipping configuration.')
+"
     wine "/config/.wine/drive_c/Program Files/MetaTrader 5_1/terminal64.exe" /portable &
     sleep 3
 fi

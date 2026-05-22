@@ -13,6 +13,8 @@ from decimal import Decimal, ROUND_HALF_UP, ROUND_DOWN, getcontext
 
 # --- Third-Party Imports ---
 import MetaTrader5 as mt5
+import numpy as np
+import talib
 
 # ==============================================================================
 # --- Configuration ---
@@ -222,13 +224,27 @@ def calculate_risk_based_volume(risk_percent_str, sl_pips_str, account_info, sym
     except Exception as e:
         return None, f"Error during risk calculation: {e}"
 
+def get_filling_mode(symbol_info):
+    """ Resolves the correct type_filling parameter based on symbol's allowed filling modes. """
+    if not symbol_info:
+        return mt5.ORDER_FILLING_FOK
+    mode = symbol_info.filling_mode
+    if (mode & 1) != 0:  # SYMBOL_FILLING_FOK
+        return mt5.ORDER_FILLING_FOK
+    elif (mode & 2) != 0:  # SYMBOL_FILLING_IOC
+        return mt5.ORDER_FILLING_IOC
+    elif (mode & 4) != 0:  # SYMBOL_FILLING_RETURN
+        return mt5.ORDER_FILLING_RETURN
+    return mt5.ORDER_FILLING_FOK
+
 def close_mt5_position(position_ticket, position_obj):
     """ Closes a specific MT5 position. """
     if not position_obj: logging.error(f"[{position_ticket}] Cannot close: Position object is None."); return False
     symbol_info, tick = mt5.symbol_info(position_obj.symbol), mt5.symbol_info_tick(position_obj.symbol)
     if not symbol_info or not tick: logging.error(f"[{position_ticket}] Cannot get info/tick to close {position_obj.symbol}."); return False
     is_buy_pos = position_obj.type == mt5.POSITION_TYPE_BUY
-    request = {"action": mt5.TRADE_ACTION_DEAL, "position": position_ticket, "symbol": position_obj.symbol, "volume": position_obj.volume, "type": mt5.ORDER_TYPE_SELL if is_buy_pos else mt5.ORDER_TYPE_BUY, "price": round_price(tick.bid if is_buy_pos else tick.ask, symbol_info.digits), "deviation": DEFAULT_SLIPPAGE_DEVIATION, "magic": MAGIC_NUMBER, "comment": "", "type_time": mt5.ORDER_TIME_GTC, "type_filling": FILLING_MODE}
+    filling_mode = get_filling_mode(symbol_info)
+    request = {"action": mt5.TRADE_ACTION_DEAL, "position": position_ticket, "symbol": position_obj.symbol, "volume": position_obj.volume, "type": mt5.ORDER_TYPE_SELL if is_buy_pos else mt5.ORDER_TYPE_BUY, "price": round_price(tick.bid if is_buy_pos else tick.ask, symbol_info.digits), "deviation": DEFAULT_SLIPPAGE_DEVIATION, "magic": MAGIC_NUMBER, "comment": "", "type_time": mt5.ORDER_TIME_GTC, "type_filling": filling_mode}
     result = mt5.order_send(request)
     if result and result.retcode == mt5.TRADE_RETCODE_DONE: logging.info(f"Successfully closed position {position_ticket}."); return True
     logging.error(f"[{position_ticket}] Failed closing order. Reason: {result.comment if result else mt5.last_error()}"); return False
@@ -240,6 +256,25 @@ def get_latest_server_time():
         tick = mt5.symbol_info_tick(symbol)
         if tick and tick.time > latest_time: latest_time = tick.time
     return latest_time or int(time.time())
+
+def calculate_atr(symbol, period=14):
+    """ Calculates the Average True Range (ATR) over 14 completed daily bars using TA-Lib. """
+    # Fetch completed daily bars plus buffer for TA-Lib ATR calculation
+    rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_D1, 1, 100)
+    if rates is None or len(rates) < period + 1:
+        rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_D1, 0, 100)
+        if rates is None or len(rates) < period + 1:
+            return None
+            
+    high = np.array([float(bar['high']) for bar in rates], dtype=np.float64)
+    low = np.array([float(bar['low']) for bar in rates], dtype=np.float64)
+    close = np.array([float(bar['close']) for bar in rates], dtype=np.float64)
+    
+    atr_values = talib.ATR(high, low, close, timeperiod=period)
+    if atr_values is None or len(atr_values) == 0 or np.isnan(atr_values[-1]):
+        return None
+    return float(atr_values[-1])
+
 
 # ==============================================================================
 # --- HTTP Request Handler ---
@@ -274,7 +309,17 @@ class RequestHandler(BaseHTTPRequestHandler):
             command = data.get('request', '').lower()
             if not command: return self._send_error_response("'request' field is missing.", 400)
             
-            handlers = {"trade": self.handle_trade, "accountstatus": self.handle_account_status, "cancelandflatten": self.handle_cancel_flatten, "movestoploss": self.handle_move_stoploss, "getspreads": self.handle_get_spreads, "modify_order": self.handle_modify_order, "cancel_order": self.handle_cancel_order, "manage_position_stops": self.handle_manage_position_stops}
+            handlers = {
+                "trade": self.handle_trade, 
+                "accountstatus": self.handle_account_status, 
+                "cancelandflatten": self.handle_cancel_flatten, 
+                "movestoploss": self.handle_move_stoploss, 
+                "getspreads": self.handle_get_spreads, 
+                "modify_order": self.handle_modify_order, 
+                "cancel_order": self.handle_cancel_order, 
+                "manage_position_stops": self.handle_manage_position_stops,
+                "getatr": self.handle_get_atr
+            }
             handler = handlers.get(command)
 
             if handler: handler(data)
@@ -335,8 +380,9 @@ class RequestHandler(BaseHTTPRequestHandler):
                 sl = price - sl_pips if is_buy else price + sl_pips
                 tp = price + tp_pips if is_buy else price - tp_pips
                 is_market = order_type in [mt5.ORDER_TYPE_BUY, mt5.ORDER_TYPE_SELL]
+                filling_mode = get_filling_mode(symbol_info)
                 
-                request = {"action": mt5.TRADE_ACTION_DEAL if is_market else mt5.TRADE_ACTION_PENDING, "symbol": instrument, "volume": vol, "type": order_type, "price": round_price(price, symbol_info.digits), "sl": round_price(sl, symbol_info.digits) if sl_pips > 0 else 0.0, "tp": round_price(tp, symbol_info.digits) if tp_pips > 0 else 0.0, "deviation": DEFAULT_SLIPPAGE_DEVIATION, "magic": MAGIC_NUMBER, "comment": "", "type_time": mt5.ORDER_TIME_GTC, "type_filling": FILLING_MODE}
+                request = {"action": mt5.TRADE_ACTION_DEAL if is_market else mt5.TRADE_ACTION_PENDING, "symbol": instrument, "volume": vol, "type": order_type, "price": round_price(price, symbol_info.digits), "sl": round_price(sl, symbol_info.digits) if sl_pips > 0 else 0.0, "tp": round_price(tp, symbol_info.digits) if tp_pips > 0 else 0.0, "deviation": DEFAULT_SLIPPAGE_DEVIATION, "magic": MAGIC_NUMBER, "comment": "", "type_time": mt5.ORDER_TIME_GTC, "type_filling": filling_mode}
                 order_result = mt5.order_send(request)
                 
                 if order_result and order_result.retcode in [mt5.TRADE_RETCODE_DONE, mt5.TRADE_RETCODE_PLACED]: result["success"], result["orderId"] = True, str(order_result.order)
@@ -358,7 +404,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             
             if new_price_type == "market" or (is_buy_order and new_price_type == "ask") or (not is_buy_order and new_price_type == "bid"):
                 if mt5.order_send({"action": mt5.TRADE_ACTION_REMOVE, "order": order.ticket}).retcode != mt5.TRADE_RETCODE_DONE: return self._send_error_response(f"Failed to cancel order {order.ticket} before moving to market.", 500)
-                market_req = {"action": mt5.TRADE_ACTION_DEAL, "symbol": order.symbol, "volume": order.volume_initial, "type": mt5.ORDER_TYPE_BUY if is_buy_order else mt5.ORDER_TYPE_SELL, "price": tick.ask if is_buy_order else tick.bid, "sl": order.sl, "tp": order.tp, "deviation": DEFAULT_SLIPPAGE_DEVIATION, "magic": MAGIC_NUMBER, "comment": "", "type_time": mt5.ORDER_TIME_GTC, "type_filling": FILLING_MODE}
+                filling_mode = get_filling_mode(symbol_info)
+                market_req = {"action": mt5.TRADE_ACTION_DEAL, "symbol": order.symbol, "volume": order.volume_initial, "type": mt5.ORDER_TYPE_BUY if is_buy_order else mt5.ORDER_TYPE_SELL, "price": tick.ask if is_buy_order else tick.bid, "sl": order.sl, "tp": order.tp, "deviation": DEFAULT_SLIPPAGE_DEVIATION, "magic": MAGIC_NUMBER, "comment": "", "type_time": mt5.ORDER_TIME_GTC, "type_filling": filling_mode}
                 market_res = mt5.order_send(market_req)
                 if market_res and market_res.retcode == mt5.TRADE_RETCODE_DONE: self._send_json_response({"success": True, "message": f"Order {order.ticket} moved to market."})
                 else: self._send_error_response(f"Failed to send market order. Result: {market_res.comment if market_res else 'N/A'}", 500)
@@ -474,6 +521,25 @@ class RequestHandler(BaseHTTPRequestHandler):
             if errors: final_response.update({"message": "Could not retrieve all spreads.", "errors": errors})
             
             self._send_json_response(final_response)
+            
+    def handle_get_atr(self, data):
+        if not mt5_manager.ensure_connection(): return self._send_error_response("Failed to connect to MetaTrader 5.", 503)
+        with mt5_manager.lock:
+            instrument = data.get("instrument")
+            if not instrument: return self._send_error_response("Missing 'instrument' field", 400)
+            
+            symbol_info = mt5.symbol_info(instrument) or (mt5.symbol_select(instrument, True) and time.sleep(0.1) and mt5.symbol_info(instrument))
+            if not symbol_info: return self._send_error_response(f"Instrument '{instrument}' not found.", 404)
+            
+            atr = calculate_atr(instrument)
+            if atr is None:
+                return self._send_error_response(f"Failed to calculate ATR for {instrument}.", 500)
+            
+            self._send_json_response({
+                "success": True,
+                "instrument": instrument,
+                "atr": atr
+            })
             
      
     def handle_account_status(self, data):

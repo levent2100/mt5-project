@@ -475,6 +475,79 @@ async def websocket_endpoint(websocket: WebSocket):
                         "error": None if res.get("success") else res.get("message")
                     }, websocket)
 
+                elif command == "get_atr":
+                    symbol = payload.get("symbol")
+                    if not symbol:
+                        await manager.send_personal_message({
+                            "requestId": req_id,
+                            "status": "error",
+                            "error": "Missing 'symbol' parameter in payload"
+                        }, websocket)
+                        continue
+                    
+                    res = await copier.get_atr(symbol)
+                    status = "ok" if res.get("success") else "error"
+                    await manager.send_personal_message({
+                        "requestId": req_id,
+                        "status": status,
+                        "data": res if res.get("success") else None,
+                        "error": None if res.get("success") else res.get("error")
+                    }, websocket)
+
+                elif command == "modify_order":
+                    symbol = payload.get("symbol")
+                    new_price_type = payload.get("new_price_type")
+                    offset_pips = payload.get("offset_pips", 0.0)
+                    
+                    await log_activity(
+                        f"UI requested modify pending order for {symbol}: price type '{new_price_type}', offset {offset_pips} pips",
+                        source="UI-WS",
+                        log_type="info"
+                    )
+                    
+                    res = await copier.copy_modify_order(payload)
+                    status = "ok" if res.get("success") else "error"
+                    await log_activity(res.get("message"), source="Copier", log_type="info" if res.get("success") else "error")
+                    
+                    await manager.send_personal_message({
+                        "requestId": req_id,
+                        "status": status,
+                        "data": {"message": res.get("message")},
+                        "error": None if res.get("success") else res.get("message")
+                    }, websocket)
+
+                elif command == "cancel_order":
+                    symbol = payload.get("symbol")
+                    await log_activity(f"UI requested cancel pending order for {symbol}.", source="UI-WS", log_type="warning")
+                    
+                    adapted_payload = {"instrument": symbol}
+                    res = await copier.copy_cancel_pending(adapted_payload)
+                    
+                    status = "ok" if res.get("success") else "error"
+                    await log_activity(res.get("message"), source="Copier", log_type="info" if res.get("success") else "error")
+                    
+                    await manager.send_personal_message({
+                        "requestId": req_id,
+                        "status": status,
+                        "data": {"message": res.get("message")},
+                        "error": None if res.get("success") else res.get("message")
+                    }, websocket)
+
+                elif command == "manage_position_stops":
+                    symbol = payload.get("symbol")
+                    await log_activity(f"UI requested manage position stops for {symbol}.", source="UI-WS", log_type="info")
+                    
+                    res = await copier.copy_manage_position_stops(payload)
+                    status = "ok" if res.get("success") else "error"
+                    await log_activity(res.get("message"), source="Copier", log_type="info" if res.get("success") else "error")
+                    
+                    await manager.send_personal_message({
+                        "requestId": req_id,
+                        "status": status,
+                        "data": {"message": res.get("message")},
+                        "error": None if res.get("success") else res.get("message")
+                    }, websocket)
+
                 else:
                     await manager.send_personal_message({
                         "requestId": req_id,

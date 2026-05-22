@@ -122,6 +122,38 @@ export default function Dashboard() {
   const [slPips, setSlPips] = useState<string>('');
   const [quantity, setQuantity] = useState<string>('1.0');
   const [isRiskBasedInput, setIsRiskBasedInput] = useState<boolean>(true);
+
+  // Upgraded Cockpit Pad States
+  const [executionTab, setExecutionTab] = useState<'entry' | 'modify' | 'manage'>('entry');
+  const [entryMode, setEntryMode] = useState<'pip_risk' | 'atr_risk' | 'pending'>('pip_risk');
+  
+  // 1. Pip & %Risk Mode
+  const [customRisk, setCustomRisk] = useState<string>('2.0');
+  
+  // 2. ATR & %Risk Mode
+  const [atrMultiplier, setAtrMultiplier] = useState<string>('2.0');
+  const [atrRiskPerc, setAtrRiskPerc] = useState<string>('2.0');
+  const [atrInfo, setAtrInfo] = useState<{ atr_raw: number; atr_pips: number } | null>(null);
+  const [atrLoading, setAtrLoading] = useState<boolean>(false);
+  
+  // 3. Pending Limit Mode
+  const [entryOffsetBuy, setEntryOffsetBuy] = useState<string>('5.0');
+  const [entryOffsetSell, setEntryOffsetSell] = useState<string>('5.0');
+  const [limitSlPips, setLimitSlPips] = useState<string>('15.0');
+  const [limitTpPips, setLimitTpPips] = useState<string>('30.0');
+  const [limitSizingMode, setLimitSizingMode] = useState<'risk' | 'lots'>('risk');
+  const [limitRiskPerc, setLimitRiskPerc] = useState<string>('2.0');
+  const [limitLots, setLimitLots] = useState<string>('1.0');
+  
+  // 4. Modify Order Mode
+  const [modifyOffsetBuy, setModifyOffsetBuy] = useState<string>('5.0');
+  const [modifyOffsetSell, setModifyOffsetSell] = useState<string>('5.0');
+  
+  // 5. Manage Position Mode
+  const [manageSlEntryPips, setManageSlEntryPips] = useState<string>('10.0');
+  const [manageSlMidPips, setManageSlMidPips] = useState<string>('5.0');
+  const [manageTpEntryPips, setManageTpEntryPips] = useState<string>('20.0');
+  const [manageTpMidPips, setManageTpMidPips] = useState<string>('10.0');
   
   // Modal / Feedback States
   const [alertMessage, setAlertMessage] = useState<{ text: string; type: 'success' | 'danger' | 'info' | 'warning' } | null>(null);
@@ -381,43 +413,226 @@ export default function Dashboard() {
     };
   }, []);
 
+  // --- Symbol Suffix Matcher & Derived Working States ---
+  const matchSymbol = (brokerSymbol: string | undefined, displaySymbol: string | undefined, globalSymbol: string): boolean => {
+    if (!globalSymbol) return false;
+    if (displaySymbol === globalSymbol) return true;
+    if (brokerSymbol === globalSymbol) return true;
+    
+    // Suffix matching: e.g. "EURUSD.pi", "EURUSD.raw", "EURUSD..", "EURUSD..." -> "EURUSD"
+    if (brokerSymbol) {
+      const cleanBroker = brokerSymbol.split(/[.\-_]/)[0];
+      if (cleanBroker === globalSymbol) return true;
+      if (brokerSymbol.startsWith(globalSymbol)) return true;
+    }
+    return false;
+  };
+
+  const activePosition = useMemo(() => {
+    if (!referenceAccount?.positions || !selectedSymbol) return null;
+    return referenceAccount.positions.find(pos => matchSymbol(pos.symbol, pos.displaySymbol, selectedSymbol));
+  }, [referenceAccount, selectedSymbol]);
+
+  const pendingOrder = useMemo(() => {
+    if (!referenceAccount?.orders || !selectedSymbol) return null;
+    return referenceAccount.orders.find(ord => matchSymbol(ord.symbol, ord.displaySymbol, selectedSymbol));
+  }, [referenceAccount, selectedSymbol]);
+
   // --- Auto-fill SL pips based on selected symbol ---
   useEffect(() => {
     if (selectedSymbol && defaultSlPips[selectedSymbol] !== undefined) {
-      setSlPips(defaultSlPips[selectedSymbol].toString());
+      const slString = defaultSlPips[selectedSymbol].toString();
+      setSlPips(slString);
+      setLimitSlPips(slString);
+      
+      const slFloat = parseFloat(slString);
+      setLimitTpPips((slFloat * 2.0).toString());
+      
       // Adjust forms for indexes vs currencies
       const isIndex = ['SP500', 'DAX40', 'FTSE100', 'NQ100', 'GOLD'].includes(selectedSymbol);
       setIsRiskBasedInput(!isIndex);
+      if (isIndex) {
+        setLimitSizingMode('lots');
+      } else {
+        setLimitSizingMode('risk');
+      }
     }
   }, [selectedSymbol, defaultSlPips]);
 
-  // --- Interactive Command Triggers ---
-  const handleTrade = (direction: 'buy' | 'sell') => {
-    const slVal = parseFloat(slPips);
-    const qtyVal = parseFloat(quantity);
+  // --- Dynamic ATR fetcher ---
+  useEffect(() => {
+    if (selectedSymbol && entryMode === 'atr_risk') {
+      setAtrLoading(true);
+      sendRequest('get_atr', { symbol: selectedSymbol })
+        .then(res => {
+          if (res?.success) {
+            setAtrInfo(res);
+          } else {
+            setAtrInfo(null);
+            addLog(`Failed to fetch ATR for ${selectedSymbol}: ${res?.error || 'Unknown error'}`, 'UI', 'warning');
+          }
+        })
+        .catch(err => {
+          setAtrInfo(null);
+          addLog(`ATR fetch error: ${err}`, 'UI', 'error');
+        })
+        .finally(() => setAtrLoading(false));
+    }
+  }, [selectedSymbol, entryMode]);
 
+  // --- Upgraded Interactive Cockpit Command Triggers ---
+  const handleEntryTrade = (
+    direction: 'buy' | 'sell',
+    ordertype: string = 'market',
+    slVal: number,
+    tpVal: number = 0,
+    offsetVal: number = 0,
+    riskPerc: number = 0,
+    lotsVal: number = 0
+  ) => {
     if (!selectedSymbol) return triggerAlert('Select an instrument first!', 'warning');
     if (isNaN(slVal) || slVal <= 0) return triggerAlert('Input a valid Stop Loss (pips)!', 'warning');
-    if (!isRiskBasedInput && (isNaN(qtyVal) || qtyVal <= 0)) {
-      return triggerAlert('Input a valid trade quantity (lots)!', 'warning');
-    }
 
-    const payload = {
+    const payload: any = {
       symbol: selectedSymbol,
       direction,
-      ordertype: 'market',
-      qty: isRiskBasedInput ? 0 : qtyVal,
-      sl_pips: slVal
+      ordertype,
+      sl_pips: slVal,
+      tp_pips: tpVal,
+      offset_pips: offsetVal,
     };
 
-    triggerAlert(`Sending scaled ${direction.toUpperCase()} for ${selectedSymbol}...`, 'info');
-    
+    if (riskPerc > 0) {
+      payload.risk = riskPerc;
+      payload.qty = 0.0;
+    } else {
+      payload.qty = lotsVal;
+      payload.risk = 0.0;
+    }
+
+    const modeText = ordertype === 'market' ? 'MARKET' : `PENDING ${ordertype.toUpperCase()}`;
+    triggerAlert(`Sending scaled ${modeText} ${direction.toUpperCase()} for ${selectedSymbol}...`, 'info');
+
     sendRequest('trade', payload)
       .then(res => {
         triggerAlert(res?.message || `Trade placed successfully.`, 'success');
       })
       .catch(err => {
         triggerAlert(`Trade failed: ${err}`, 'danger');
+      });
+  };
+
+  const handleTrade = (direction: 'buy' | 'sell') => {
+    handleEntryTrade(
+      direction,
+      'market',
+      parseFloat(slPips),
+      0,
+      0,
+      isRiskBasedInput ? 2.0 : 0,
+      parseFloat(quantity)
+    );
+  };
+
+  const handleModifyOrder = (newPriceType: string) => {
+    if (!selectedSymbol) return triggerAlert('Select a symbol first!', 'warning');
+    
+    let offsetVal = 0;
+    if (newPriceType === 'offset' && pendingOrder) {
+      const isBuy = pendingOrder.direction === 'BUY';
+      offsetVal = parseFloat(isBuy ? modifyOffsetBuy : modifyOffsetSell);
+      if (isNaN(offsetVal) || offsetVal < 0) {
+        return triggerAlert('Please input a valid offset value!', 'warning');
+      }
+    }
+
+    const payload = {
+      symbol: selectedSymbol,
+      new_price_type: newPriceType,
+      offset_pips: offsetVal
+    };
+
+    triggerAlert(`Modifying pending order for ${selectedSymbol} to ${newPriceType.toUpperCase()}...`, 'info');
+
+    sendRequest('modify_order', payload)
+      .then(res => {
+        triggerAlert(res?.message || 'Order modified successfully.', 'success');
+      })
+      .catch(err => {
+        triggerAlert(`Modification failed: ${err}`, 'danger');
+      });
+  };
+
+  const handleCancelSelectedOrder = () => {
+    if (!selectedSymbol) return triggerAlert('Select a symbol first!', 'warning');
+    
+    setConfirmModal({
+      isOpen: true,
+      title: 'Cancel Pending Order',
+      message: `Are you sure you want to cancel the working pending order for ${selectedSymbol} across all accounts?`,
+      isDanger: true,
+      action: () => {
+        triggerAlert(`Cancelling pending order for ${selectedSymbol}...`, 'info');
+        sendRequest('cancel_order', { symbol: selectedSymbol })
+          .then(res => triggerAlert(res?.message || 'Order cancelled successfully.', 'success'))
+          .catch(err => triggerAlert(`Cancellation failed: ${err}`, 'danger'));
+        setConfirmModal(prev => ({ ...prev, isOpen: false }));
+      }
+    });
+  };
+
+  const handleManagePosition = (type: 'breakeven' | 'flatten' | 'sl_entry' | 'sl_mid' | 'tp_entry' | 'tp_mid') => {
+    if (!selectedSymbol) return triggerAlert('Select a symbol first!', 'warning');
+
+    if (type === 'flatten') {
+      setConfirmModal({
+        isOpen: true,
+        title: 'Flatten Position',
+        message: `Are you sure you want to close ALL active positions for ${selectedSymbol} at Market across all accounts?`,
+        isDanger: true,
+        action: () => {
+          triggerAlert(`Flattening ${selectedSymbol} positions...`, 'info');
+          sendRequest('flatten', { instrument: selectedSymbol })
+            .then(res => triggerAlert(res?.message || 'Positions closed successfully.', 'success'))
+            .catch(err => triggerAlert(`Flatten failed: ${err}`, 'danger'));
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        }
+      });
+      return;
+    }
+
+    const payload: any = {
+      symbol: selectedSymbol
+    };
+
+    if (type === 'breakeven') {
+      payload.sl = { type: 'breakeven' };
+    } else if (type === 'sl_entry') {
+      const slVal = parseFloat(manageSlEntryPips);
+      if (isNaN(slVal) || slVal < 0) return triggerAlert('Invalid SL pips value', 'warning');
+      payload.sl = { type: 'pips_from_entry', value: slVal };
+    } else if (type === 'sl_mid') {
+      const slVal = parseFloat(manageSlMidPips);
+      if (isNaN(slVal) || slVal < 0) return triggerAlert('Invalid SL pips value', 'warning');
+      payload.sl = { type: 'pips_from_mid', value: slVal };
+    } else if (type === 'tp_entry') {
+      const tpVal = parseFloat(manageTpEntryPips);
+      if (isNaN(tpVal) || tpVal < 0) return triggerAlert('Invalid TP pips value', 'warning');
+      payload.tp = { type: 'pips_from_entry', value: tpVal };
+    } else if (type === 'tp_mid') {
+      const tpVal = parseFloat(manageTpMidPips);
+      if (isNaN(tpVal) || tpVal < 0) return triggerAlert('Invalid TP pips value', 'warning');
+      payload.tp = { type: 'pips_from_mid', value: tpVal };
+    }
+
+    triggerAlert(`Updating position stops for ${selectedSymbol}...`, 'info');
+
+    sendRequest('manage_position_stops', payload)
+      .then(res => {
+        triggerAlert(res?.message || 'Position stops updated successfully.', 'success');
+      })
+      .catch(err => {
+        triggerAlert(`Failed to update position stops: ${err}`, 'danger');
       });
   };
 
@@ -696,22 +911,87 @@ export default function Dashboard() {
               </button>
             </div>
 
-            {/* Quick Order pad */}
+            {/* Redesigned Execution Cockpit */}
             <div className={`flex flex-col gap-4 pb-5 border-b ${
               theme === 'dark' ? 'border-neutral-900/60' : 'border-neutral-200/85'
             }`}>
               <div className="flex justify-between items-center px-1">
                 <h2 className={`text-[10px] font-bold uppercase tracking-wider ${
                   theme === 'dark' ? 'text-neutral-500' : 'text-neutral-450'
-                }`}>Execution Pad</h2>
+                }`}>Execution Cockpit</h2>
                 <span className={`px-1.5 py-0.2 text-[8px] rounded font-mono ${
-                  theme === 'dark' ? 'bg-neutral-900 text-neutral-500 border border-neutral-850' : 'bg-neutral-200 text-neutral-600 border border-neutral-250'
-                }`}>Scaled Copy</span>
+                  theme === 'dark' ? 'bg-neutral-950 text-neutral-500 border border-neutral-900' : 'bg-neutral-200 text-neutral-600 border border-neutral-250'
+                }`}>Staged Cmds</span>
               </div>
 
-              {/* Instrument Select */}
+              {/* Tabs Row - Beautiful pills */}
+              <div className={`grid grid-cols-3 p-1 rounded-lg border transition-all ${
+                theme === 'dark' ? 'bg-neutral-950/80 border-neutral-900' : 'bg-neutral-100 border-neutral-200'
+              }`}>
+                {/* Entry Tab Button */}
+                <button
+                  onClick={() => setExecutionTab('entry')}
+                  className={`py-1.5 rounded-md font-bold text-[10px] uppercase tracking-wider transition-all active:scale-95 ${
+                    executionTab === 'entry'
+                      ? (theme === 'dark' ? 'bg-neutral-850 text-white shadow-sm' : 'bg-white text-neutral-900 shadow-sm')
+                      : (theme === 'dark' ? 'text-neutral-500 hover:text-neutral-300' : 'text-neutral-500 hover:text-neutral-800')
+                  }`}
+                >
+                  Entry
+                </button>
+
+                {/* Modify Tab Button with Amber Pulsing Badge if pending order exists */}
+                <button
+                  onClick={() => setExecutionTab('modify')}
+                  className={`py-1.5 rounded-md font-bold text-[10px] uppercase tracking-wider transition-all active:scale-95 flex items-center justify-center gap-1.5 relative ${
+                    executionTab === 'modify'
+                      ? (theme === 'dark' ? 'bg-neutral-850 text-white shadow-sm' : 'bg-white text-neutral-900 shadow-sm')
+                      : (theme === 'dark' ? 'text-neutral-500 hover:text-neutral-300' : 'text-neutral-500 hover:text-neutral-800')
+                  }`}
+                >
+                  Modify
+                  {pendingOrder && (
+                    <span className="relative flex h-1.5 w-1.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-amber-500"></span>
+                    </span>
+                  )}
+                </button>
+
+                {/* Manage Tab Button with Emerald Pulsing Badge if position exists */}
+                <button
+                  onClick={() => setExecutionTab('manage')}
+                  className={`py-1.5 rounded-md font-bold text-[10px] uppercase tracking-wider transition-all active:scale-95 flex items-center justify-center gap-1.5 relative ${
+                    executionTab === 'manage'
+                      ? (theme === 'dark' ? 'bg-neutral-850 text-white shadow-sm' : 'bg-white text-neutral-900 shadow-sm')
+                      : (theme === 'dark' ? 'text-neutral-500 hover:text-neutral-300' : 'text-neutral-500 hover:text-neutral-800')
+                  }`}
+                >
+                  Manage
+                  {activePosition && (
+                    <span className="relative flex h-1.5 w-1.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                    </span>
+                  )}
+                </button>
+              </div>
+
+              {/* Dynamic Target Instrument */}
               <div className="flex flex-col gap-1">
-                <label className={`text-[10px] px-1 font-bold ${theme === 'dark' ? 'text-neutral-500' : 'text-neutral-450'}`}>Select Symbol</label>
+                <div className="flex justify-between items-center px-1">
+                  <label className={`text-[10px] font-bold ${theme === 'dark' ? 'text-neutral-500' : 'text-neutral-450'}`}>Select Symbol</label>
+                  {selectedSymbol && (
+                    <span className="flex items-center gap-1">
+                      {activePosition && (
+                        <span className="px-1.5 py-0.5 rounded text-[8px] font-extrabold bg-emerald-950/40 border border-emerald-900/40 text-emerald-400">POS</span>
+                      )}
+                      {pendingOrder && (
+                        <span className="px-1.5 py-0.5 rounded text-[8px] font-extrabold bg-amber-950/40 border border-amber-900/40 text-amber-400">ORD</span>
+                      )}
+                    </span>
+                  )}
+                </div>
                 <select
                   value={selectedSymbol}
                   onChange={(e) => setSelectedSymbol(e.target.value)}
@@ -728,80 +1008,710 @@ export default function Dashboard() {
                 </select>
               </div>
 
-              {/* Input Lot sizes / SL Pips */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="flex flex-col gap-1">
-                  <label className={`text-[10px] px-1 font-bold ${theme === 'dark' ? 'text-neutral-500' : 'text-neutral-450'}`}>SL Pips</label>
-                  <input
-                    type="number"
-                    value={slPips}
-                    onChange={(e) => setSlPips(e.target.value)}
-                    placeholder="SL pips"
-                    className={`w-full border rounded-lg px-3 py-2 text-xs font-mono transition-all font-semibold focus:outline-none ${
-                      theme === 'dark'
-                        ? 'bg-neutral-900/85 border-neutral-800 text-neutral-200 focus:border-neutral-600'
-                        : 'bg-white border-neutral-200 text-neutral-800 focus:border-neutral-400'
-                    }`}
-                  />
-                </div>
-
-                <div className="flex flex-col gap-1">
-                  <div className="flex justify-between items-center px-1">
-                    <label className={`text-[10px] font-bold ${theme === 'dark' ? 'text-neutral-500' : 'text-neutral-450'}`}>Volume</label>
-                    <button 
-                      onClick={() => setIsRiskBasedInput(!isRiskBasedInput)}
-                      className={`text-[8px] uppercase tracking-wider font-extrabold hover:underline ${
-                        theme === 'dark' ? 'text-neutral-400 hover:text-white' : 'text-neutral-500 hover:text-neutral-800'
+              {executionTab === 'entry' && (
+                <div className="flex flex-col gap-4">
+                  {/* Mode select: Pip & %Risk | ATR & %Risk | Pending Limit */}
+                  <div className={`grid grid-cols-3 gap-1 p-0.5 rounded-lg border transition-all ${
+                    theme === 'dark' ? 'bg-neutral-950/40 border-neutral-900' : 'bg-neutral-100/50 border-neutral-200'
+                  }`}>
+                    <button
+                      onClick={() => setEntryMode('pip_risk')}
+                      className={`py-1 rounded-md text-[9px] font-bold uppercase transition-all ${
+                        entryMode === 'pip_risk'
+                          ? (theme === 'dark' ? 'bg-neutral-800 text-white shadow-sm' : 'bg-white text-neutral-900 shadow-sm')
+                          : (theme === 'dark' ? 'text-neutral-500 hover:text-neutral-300' : 'text-neutral-500 hover:text-neutral-800')
                       }`}
                     >
-                      {isRiskBasedInput ? 'Risk' : 'Lots'}
+                      Pip Risk
+                    </button>
+                    <button
+                      onClick={() => setEntryMode('atr_risk')}
+                      className={`py-1 rounded-md text-[9px] font-bold uppercase transition-all ${
+                        entryMode === 'atr_risk'
+                          ? (theme === 'dark' ? 'bg-neutral-800 text-white shadow-sm' : 'bg-white text-neutral-900 shadow-sm')
+                          : (theme === 'dark' ? 'text-neutral-500 hover:text-neutral-300' : 'text-neutral-500 hover:text-neutral-800')
+                      }`}
+                    >
+                      ATR Risk
+                    </button>
+                    <button
+                      onClick={() => setEntryMode('pending')}
+                      className={`py-1 rounded-md text-[9px] font-bold uppercase transition-all ${
+                        entryMode === 'pending'
+                          ? (theme === 'dark' ? 'bg-neutral-800 text-white shadow-sm' : 'bg-white text-neutral-900 shadow-sm')
+                          : (theme === 'dark' ? 'text-neutral-500 hover:text-neutral-300' : 'text-neutral-500 hover:text-neutral-800')
+                      }`}
+                    >
+                      Pending
                     </button>
                   </div>
-                  <input
-                    type={isRiskBasedInput ? "text" : "number"}
-                    disabled={isRiskBasedInput}
-                    value={isRiskBasedInput ? "Auto %Risk" : quantity}
-                    onChange={(e) => setQuantity(e.target.value)}
-                    placeholder="Lots"
-                    className={`w-full border rounded-lg px-3 py-2 text-xs font-mono transition-all font-semibold focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed ${
-                      theme === 'dark'
-                        ? 'bg-neutral-900/85 border-neutral-800 text-neutral-200 focus:border-neutral-600'
-                        : 'bg-white border-neutral-200 text-neutral-800 focus:border-neutral-400'
-                    }`}
-                  />
+
+                  {/* Mode 1: Pip & %Risk Form */}
+                  {entryMode === 'pip_risk' && (
+                    <div className="flex flex-col gap-3">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="flex flex-col gap-1">
+                          <label className={`text-[10px] px-1 font-bold ${theme === 'dark' ? 'text-neutral-500' : 'text-neutral-450'}`}>SL Pips</label>
+                          <input
+                            type="number"
+                            value={slPips}
+                            onChange={(e) => setSlPips(e.target.value)}
+                            placeholder="SL pips"
+                            className={`w-full border rounded-lg px-3 py-2 text-xs font-mono transition-all font-semibold focus:outline-none ${
+                              theme === 'dark'
+                                ? 'bg-neutral-900/85 border-neutral-800 text-neutral-200 focus:border-neutral-600'
+                                : 'bg-white border-neutral-200 text-neutral-800 focus:border-neutral-400'
+                            }`}
+                          />
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <label className={`text-[10px] px-1 font-bold ${theme === 'dark' ? 'text-neutral-500' : 'text-neutral-450'}`}>Risk %</label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            value={customRisk}
+                            onChange={(e) => setCustomRisk(e.target.value)}
+                            placeholder="Risk %"
+                            className={`w-full border rounded-lg px-3 py-2 text-xs font-mono transition-all font-semibold focus:outline-none ${
+                              theme === 'dark'
+                                ? 'bg-neutral-900/85 border-neutral-800 text-neutral-200 focus:border-neutral-600'
+                                : 'bg-white border-neutral-200 text-neutral-800 focus:border-neutral-400'
+                            }`}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3 mt-1">
+                        <button
+                          onClick={() => handleEntryTrade('buy', 'market', parseFloat(slPips), 0, 0, parseFloat(customRisk))}
+                          className="py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs tracking-wide active:scale-95 transition-all flex items-center justify-center gap-1.5"
+                        >
+                          <ArrowUpRight size={14} />
+                          BUY MKT
+                        </button>
+                        <button
+                          onClick={() => handleEntryTrade('sell', 'market', parseFloat(slPips), 0, 0, parseFloat(customRisk))}
+                          className="py-2.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs tracking-wide active:scale-95 transition-all flex items-center justify-center gap-1.5"
+                        >
+                          <ArrowDownRight size={14} />
+                          SELL MKT
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Mode 2: ATR & %Risk Form */}
+                  {entryMode === 'atr_risk' && (
+                    <div className="flex flex-col gap-3">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="flex flex-col gap-1">
+                          <label className={`text-[10px] px-1 font-bold ${theme === 'dark' ? 'text-neutral-500' : 'text-neutral-450'}`}>ATR Mult</label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            value={atrMultiplier}
+                            onChange={(e) => setAtrMultiplier(e.target.value)}
+                            placeholder="ATR mult"
+                            className={`w-full border rounded-lg px-3 py-2 text-xs font-mono transition-all font-semibold focus:outline-none ${
+                              theme === 'dark'
+                                ? 'bg-neutral-900/85 border-neutral-800 text-neutral-200 focus:border-neutral-600'
+                                : 'bg-white border-neutral-200 text-neutral-800 focus:border-neutral-400'
+                            }`}
+                          />
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <label className={`text-[10px] px-1 font-bold ${theme === 'dark' ? 'text-neutral-500' : 'text-neutral-450'}`}>Risk %</label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            value={atrRiskPerc}
+                            onChange={(e) => setAtrRiskPerc(e.target.value)}
+                            placeholder="Risk %"
+                            className={`w-full border rounded-lg px-3 py-2 text-xs font-mono transition-all font-semibold focus:outline-none ${
+                              theme === 'dark'
+                                ? 'bg-neutral-900/85 border-neutral-800 text-neutral-200 focus:border-neutral-600'
+                                : 'bg-white border-neutral-200 text-neutral-800 focus:border-neutral-400'
+                            }`}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Volatility Details */}
+                      <div className={`p-2.5 rounded-lg border text-[10px] font-mono flex flex-col gap-1.5 transition-colors ${
+                        theme === 'dark' ? 'bg-[#0E0E0E] border-neutral-900 text-neutral-400' : 'bg-neutral-50 border-neutral-200 text-neutral-600'
+                      }`}>
+                        {atrLoading ? (
+                          <div className="flex items-center justify-center gap-2 py-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping"></span>
+                            <span>Calculating ATR...</span>
+                          </div>
+                        ) : atrInfo ? (
+                          <>
+                            <div className="flex justify-between">
+                              <span>Daily ATR 14:</span>
+                              <span className="font-bold text-neutral-300 dark:text-neutral-200">{atrInfo.atr_raw.toFixed(5)} ({atrInfo.atr_pips.toFixed(1)} pips)</span>
+                            </div>
+                            <div className="flex justify-between border-t pt-1.5 border-neutral-800/40">
+                              <span>Target SL ({atrMultiplier}x ATR):</span>
+                              <span className="font-bold text-emerald-500 dark:text-emerald-400">
+                                {Math.round(atrInfo.atr_pips * parseFloat(atrMultiplier))} pips
+                              </span>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="text-center text-[9px] text-rose-450 py-1">
+                            No ATR volatility loaded.
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3 mt-1">
+                        <button
+                          disabled={!atrInfo}
+                          onClick={() => {
+                            if (!atrInfo) return;
+                            const calculated_atr_sl = Math.round(atrInfo.atr_pips * parseFloat(atrMultiplier));
+                            handleEntryTrade('buy', 'market', calculated_atr_sl, 0, 0, parseFloat(atrRiskPerc));
+                          }}
+                          className="py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs tracking-wide active:scale-95 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <ArrowUpRight size={14} />
+                          BUY MKT
+                        </button>
+                        <button
+                          disabled={!atrInfo}
+                          onClick={() => {
+                            if (!atrInfo) return;
+                            const calculated_atr_sl = Math.round(atrInfo.atr_pips * parseFloat(atrMultiplier));
+                            handleEntryTrade('sell', 'market', calculated_atr_sl, 0, 0, parseFloat(atrRiskPerc));
+                          }}
+                          className="py-2.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs tracking-wide active:scale-95 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <ArrowDownRight size={14} />
+                          SELL MKT
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Mode 3: Pending Limit Form */}
+                  {entryMode === 'pending' && (
+                    <div className="flex flex-col gap-3">
+                      {/* Offset Inputs */}
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="flex flex-col gap-1">
+                          <label className={`text-[9px] px-1 font-bold ${theme === 'dark' ? 'text-neutral-500' : 'text-neutral-450'}`}>Buy Offset Pips</label>
+                          <input
+                            type="number"
+                            value={entryOffsetBuy}
+                            onChange={(e) => setEntryOffsetBuy(e.target.value)}
+                            placeholder="Buy offset"
+                            className={`w-full border rounded-lg px-2.5 py-1.5 text-xs font-mono transition-all font-semibold focus:outline-none ${
+                              theme === 'dark'
+                                ? 'bg-neutral-900/85 border-neutral-800 text-neutral-200 focus:border-neutral-600'
+                                : 'bg-white border-neutral-200 text-neutral-800 focus:border-neutral-400'
+                            }`}
+                          />
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <label className={`text-[9px] px-1 font-bold ${theme === 'dark' ? 'text-neutral-500' : 'text-neutral-450'}`}>Sell Offset Pips</label>
+                          <input
+                            type="number"
+                            value={entryOffsetSell}
+                            onChange={(e) => setEntryOffsetSell(e.target.value)}
+                            placeholder="Sell offset"
+                            className={`w-full border rounded-lg px-2.5 py-1.5 text-xs font-mono transition-all font-semibold focus:outline-none ${
+                              theme === 'dark'
+                                ? 'bg-neutral-900/85 border-neutral-800 text-neutral-200 focus:border-neutral-600'
+                                : 'bg-white border-neutral-200 text-neutral-800 focus:border-neutral-400'
+                            }`}
+                          />
+                        </div>
+                      </div>
+
+                      {/* SL & TP Pips */}
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="flex flex-col gap-1">
+                          <label className={`text-[9px] px-1 font-bold ${theme === 'dark' ? 'text-neutral-500' : 'text-neutral-450'}`}>Stop Loss Pips</label>
+                          <input
+                            type="number"
+                            value={limitSlPips}
+                            onChange={(e) => {
+                              setLimitSlPips(e.target.value);
+                              const v = parseFloat(e.target.value);
+                              if (!isNaN(v)) {
+                                setLimitTpPips((v * 2.0).toString());
+                              }
+                            }}
+                            placeholder="SL pips"
+                            className={`w-full border rounded-lg px-2.5 py-1.5 text-xs font-mono transition-all font-semibold focus:outline-none ${
+                              theme === 'dark'
+                                ? 'bg-neutral-900/85 border-neutral-800 text-neutral-200 focus:border-neutral-600'
+                                : 'bg-white border-neutral-200 text-neutral-800 focus:border-neutral-400'
+                            }`}
+                          />
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <label className={`text-[9px] px-1 font-bold ${theme === 'dark' ? 'text-neutral-500' : 'text-neutral-450'}`}>Take Profit Pips</label>
+                          <input
+                            type="number"
+                            value={limitTpPips}
+                            onChange={(e) => setLimitTpPips(e.target.value)}
+                            placeholder="TP pips"
+                            className={`w-full border rounded-lg px-2.5 py-1.5 text-xs font-mono transition-all font-semibold focus:outline-none ${
+                              theme === 'dark'
+                                ? 'bg-neutral-900/85 border-neutral-800 text-neutral-200 focus:border-neutral-600'
+                                : 'bg-white border-neutral-200 text-neutral-800 focus:border-neutral-400'
+                            }`}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Sizing Toggle & Input */}
+                      <div className="flex flex-col gap-1.5">
+                        <div className="flex justify-between items-center px-1">
+                          <label className={`text-[9px] font-bold ${theme === 'dark' ? 'text-neutral-500' : 'text-neutral-450'}`}>Sizing Mode</label>
+                          <div className="flex gap-1.5">
+                            <button
+                              onClick={() => setLimitSizingMode('risk')}
+                              className={`text-[8px] uppercase tracking-wider font-extrabold px-1.5 py-0.5 rounded transition-all ${
+                                limitSizingMode === 'risk'
+                                  ? (theme === 'dark' ? 'bg-neutral-800 text-white' : 'bg-neutral-200 text-neutral-800')
+                                  : 'text-neutral-500 hover:text-neutral-350'
+                              }`}
+                            >
+                              % Risk
+                            </button>
+                            <button
+                              onClick={() => setLimitSizingMode('lots')}
+                              className={`text-[8px] uppercase tracking-wider font-extrabold px-1.5 py-0.5 rounded transition-all ${
+                                limitSizingMode === 'lots'
+                                  ? (theme === 'dark' ? 'bg-neutral-800 text-white' : 'bg-neutral-200 text-neutral-800')
+                                  : 'text-neutral-500 hover:text-neutral-350'
+                              }`}
+                            >
+                              Lots
+                            </button>
+                          </div>
+                        </div>
+
+                        <input
+                          type="number"
+                          step={limitSizingMode === 'risk' ? '0.1' : '0.01'}
+                          value={limitSizingMode === 'risk' ? limitRiskPerc : limitLots}
+                          onChange={(e) => limitSizingMode === 'risk' ? setLimitRiskPerc(e.target.value) : setLimitLots(e.target.value)}
+                          placeholder={limitSizingMode === 'risk' ? 'Risk %' : 'Lots'}
+                          className={`w-full border rounded-lg px-3 py-2 text-xs font-mono transition-all font-semibold focus:outline-none ${
+                            theme === 'dark'
+                              ? 'bg-neutral-900/85 border-neutral-800 text-neutral-200 focus:border-neutral-600'
+                              : 'bg-white border-neutral-200 text-neutral-800 focus:border-neutral-400'
+                          }`}
+                        />
+                      </div>
+
+                      {/* Staged Execution Grid */}
+                      <div className="flex flex-col gap-1.5 mt-1">
+                        <span className={`text-[9px] font-bold uppercase tracking-wider px-1 text-center ${theme === 'dark' ? 'text-neutral-500' : 'text-neutral-450'}`}>
+                          Staged Execution Matrix
+                        </span>
+
+                        <div className="grid grid-cols-2 gap-2 text-[9px] font-bold">
+                          {/* BUY Grid */}
+                          <div className="flex flex-col gap-1.5">
+                            <button
+                              onClick={() => handleEntryTrade('buy', 'market', parseFloat(limitSlPips), parseFloat(limitTpPips), 0, limitSizingMode === 'risk' ? parseFloat(limitRiskPerc) : 0, limitSizingMode === 'lots' ? parseFloat(limitLots) : 0)}
+                              className="py-1.5 rounded bg-emerald-950/20 border border-emerald-900/40 hover:bg-emerald-900/35 text-emerald-400 transition-all"
+                            >
+                              MKT
+                            </button>
+                            <button
+                              onClick={() => handleEntryTrade('buy', 'limit_ask', parseFloat(limitSlPips), parseFloat(limitTpPips), 0, limitSizingMode === 'risk' ? parseFloat(limitRiskPerc) : 0, limitSizingMode === 'lots' ? parseFloat(limitLots) : 0)}
+                              className="py-1.5 rounded bg-neutral-900 border border-neutral-800 hover:border-neutral-700 text-neutral-300 transition-all"
+                            >
+                              Limit Ask
+                            </button>
+                            <button
+                              onClick={() => handleEntryTrade('buy', 'mid', parseFloat(limitSlPips), parseFloat(limitTpPips), 0, limitSizingMode === 'risk' ? parseFloat(limitRiskPerc) : 0, limitSizingMode === 'lots' ? parseFloat(limitLots) : 0)}
+                              className="py-1.5 rounded bg-neutral-900 border border-neutral-800 hover:border-neutral-700 text-neutral-300 transition-all"
+                            >
+                              MID
+                            </button>
+                            <button
+                              onClick={() => handleEntryTrade('buy', 'join_bid', parseFloat(limitSlPips), parseFloat(limitTpPips), 0, limitSizingMode === 'risk' ? parseFloat(limitRiskPerc) : 0, limitSizingMode === 'lots' ? parseFloat(limitLots) : 0)}
+                              className="py-1.5 rounded bg-neutral-900 border border-neutral-800 hover:border-neutral-700 text-neutral-350 transition-all"
+                            >
+                              Join Bid
+                            </button>
+                            <button
+                              onClick={() => handleEntryTrade('buy', 'offset_buy', parseFloat(limitSlPips), parseFloat(limitTpPips), parseFloat(entryOffsetBuy), limitSizingMode === 'risk' ? parseFloat(limitRiskPerc) : 0, limitSizingMode === 'lots' ? parseFloat(limitLots) : 0)}
+                              className="py-1.5 rounded bg-amber-950/20 border border-amber-900/40 hover:bg-amber-900/30 text-amber-400 transition-all"
+                            >
+                              Offset (+{entryOffsetBuy})
+                            </button>
+                          </div>
+
+                          {/* SELL Grid */}
+                          <div className="flex flex-col gap-1.5">
+                            <button
+                              onClick={() => handleEntryTrade('sell', 'market', parseFloat(limitSlPips), parseFloat(limitTpPips), 0, limitSizingMode === 'risk' ? parseFloat(limitRiskPerc) : 0, limitSizingMode === 'lots' ? parseFloat(limitLots) : 0)}
+                              className="py-1.5 rounded bg-rose-950/20 border border-rose-900/40 hover:bg-rose-900/35 text-rose-450 transition-all"
+                            >
+                              MKT
+                            </button>
+                            <button
+                              onClick={() => handleEntryTrade('sell', 'limit_bid', parseFloat(limitSlPips), parseFloat(limitTpPips), 0, limitSizingMode === 'risk' ? parseFloat(limitRiskPerc) : 0, limitSizingMode === 'lots' ? parseFloat(limitLots) : 0)}
+                              className="py-1.5 rounded bg-neutral-900 border border-neutral-800 hover:border-neutral-700 text-neutral-300 transition-all"
+                            >
+                              Limit Bid
+                            </button>
+                            <button
+                              onClick={() => handleEntryTrade('sell', 'mid', parseFloat(limitSlPips), parseFloat(limitTpPips), 0, limitSizingMode === 'risk' ? parseFloat(limitRiskPerc) : 0, limitSizingMode === 'lots' ? parseFloat(limitLots) : 0)}
+                              className="py-1.5 rounded bg-neutral-900 border border-neutral-800 hover:border-neutral-700 text-neutral-300 transition-all"
+                            >
+                              MID
+                            </button>
+                            <button
+                              onClick={() => handleEntryTrade('sell', 'join_ask', parseFloat(limitSlPips), parseFloat(limitTpPips), 0, limitSizingMode === 'risk' ? parseFloat(limitRiskPerc) : 0, limitSizingMode === 'lots' ? parseFloat(limitLots) : 0)}
+                              className="py-1.5 rounded bg-neutral-900 border border-neutral-800 hover:border-neutral-700 text-neutral-350 transition-all"
+                            >
+                              Join Ask
+                            </button>
+                            <button
+                              onClick={() => handleEntryTrade('sell', 'offset_sell', parseFloat(limitSlPips), parseFloat(limitTpPips), parseFloat(entryOffsetSell), limitSizingMode === 'risk' ? parseFloat(limitRiskPerc) : 0, limitSizingMode === 'lots' ? parseFloat(limitLots) : 0)}
+                              className="py-1.5 rounded bg-amber-950/20 border border-amber-900/40 hover:bg-amber-900/30 text-amber-400 transition-all"
+                            >
+                              Offset (-{entryOffsetSell})
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </div>
+              )}
 
-              {/* Huge Buy/Sell triggers */}
-              <div className="grid grid-cols-2 gap-3 mt-1">
-                <button
-                  onClick={() => handleTrade('buy')}
-                  className="py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs tracking-wide active:scale-95 transition-all flex items-center justify-center gap-1.5"
-                >
-                  <ArrowUpRight size={14} />
-                  BUY
-                </button>
-                <button
-                  onClick={() => handleTrade('sell')}
-                  className="py-2.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs tracking-wide active:scale-95 transition-all flex items-center justify-center gap-1.5"
-                >
-                  <ArrowDownRight size={14} />
-                  SELL
-                </button>
-              </div>
+              {executionTab === 'modify' && (
+                <div className="flex flex-col gap-4">
+                  {pendingOrder ? (
+                    <div className="flex flex-col gap-3">
+                      {/* Active Pending Order Details */}
+                      <div className={`p-3 rounded-lg border flex flex-col gap-2 font-semibold text-xs transition-all ${
+                        theme === 'dark' ? 'bg-neutral-950/70 border-neutral-900 text-neutral-200' : 'bg-neutral-50 border-neutral-200 text-neutral-800'
+                      }`}>
+                        <div className="flex justify-between items-center">
+                          <span className={`${theme === 'dark' ? 'text-neutral-500' : 'text-neutral-450'}`}>Order Target:</span>
+                          <span className={`px-2 py-0.5 rounded text-[9px] font-extrabold ${
+                            pendingOrder.direction === 'BUY'
+                              ? 'bg-emerald-950/40 text-emerald-500 border border-emerald-900/45 dark:text-emerald-400'
+                              : 'bg-rose-950/40 text-rose-500 border border-rose-900/45 dark:text-rose-400'
+                          }`}>
+                            {pendingOrder.direction} {pendingOrder.orderType.toUpperCase()}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className={`${theme === 'dark' ? 'text-neutral-500' : 'text-neutral-450'}`}>Size / Price:</span>
+                          <span className="font-mono font-bold">
+                            {pendingOrder.quantity.toFixed(2)} Lots @ {pendingOrder.price.toFixed(5)}
+                          </span>
+                        </div>
+                      </div>
 
-              {/* Flatten Symbol */}
-              <button
-                onClick={handleFlattenSymbol}
-                className={`w-full py-2.5 rounded-lg border text-[10px] font-bold tracking-wider transition-all flex items-center justify-center gap-2 active:scale-95 ${
-                  theme === 'dark'
-                    ? 'bg-neutral-900 border-neutral-850 hover:border-neutral-750 text-neutral-300 hover:text-white'
-                    : 'bg-neutral-100 border-neutral-200 hover:bg-neutral-200 hover:border-neutral-300 text-neutral-700 hover:text-black'
-                }`}
-              >
-                <XOctagon size={12} className="text-rose-500 animate-pulse" />
-                FLATTEN SYMBOL
-              </button>
+                      {/* Modify Offset Input depending on direction */}
+                      <div className="flex flex-col gap-1">
+                        <label className={`text-[10px] px-1 font-bold ${theme === 'dark' ? 'text-neutral-500' : 'text-neutral-450'}`}>
+                          Offset Pips
+                        </label>
+                        <input
+                          type="number"
+                          value={pendingOrder.direction === 'BUY' ? modifyOffsetBuy : modifyOffsetSell}
+                          onChange={(e) => {
+                            if (pendingOrder.direction === 'BUY') {
+                              setModifyOffsetBuy(e.target.value);
+                            } else {
+                              setModifyOffsetSell(e.target.value);
+                            }
+                          }}
+                          placeholder="Offset pips"
+                          className={`w-full border rounded-lg px-3 py-2 text-xs font-mono transition-all font-semibold focus:outline-none ${
+                            theme === 'dark'
+                              ? 'bg-neutral-900/85 border-neutral-800 text-neutral-200 focus:border-neutral-600'
+                              : 'bg-white border-neutral-200 text-neutral-800 focus:border-neutral-400'
+                          }`}
+                        />
+                      </div>
+
+                      {/* Modify Actions Matrix */}
+                      <div className="grid grid-cols-2 gap-2 text-[10px] font-bold mt-1">
+                        <button
+                          onClick={() => handleModifyOrder('mkt')}
+                          className={`py-2 rounded border transition-all ${
+                            theme === 'dark' ? 'bg-neutral-900 border-neutral-850 hover:border-neutral-700 text-neutral-200 hover:bg-neutral-800/40' : 'bg-white border-neutral-200 hover:border-neutral-350 text-neutral-800 hover:bg-neutral-50'
+                          }`}
+                        >
+                          Move to MKT
+                        </button>
+                        <button
+                          onClick={() => handleModifyOrder(pendingOrder.direction === 'BUY' ? 'ask' : 'bid')}
+                          className={`py-2 rounded border transition-all ${
+                            theme === 'dark' ? 'bg-neutral-900 border-neutral-850 hover:border-neutral-700 text-neutral-200 hover:bg-neutral-800/40' : 'bg-white border-neutral-200 hover:border-neutral-350 text-neutral-800 hover:bg-neutral-50'
+                          }`}
+                        >
+                          Move to {pendingOrder.direction === 'BUY' ? 'Ask' : 'Bid'}
+                        </button>
+                        <button
+                          onClick={() => handleModifyOrder('mid')}
+                          className={`py-2 rounded border transition-all ${
+                            theme === 'dark' ? 'bg-neutral-900 border-neutral-850 hover:border-neutral-700 text-neutral-200 hover:bg-neutral-800/40' : 'bg-white border-neutral-200 hover:border-neutral-350 text-neutral-800 hover:bg-neutral-50'
+                          }`}
+                        >
+                          Move to MID
+                        </button>
+                        <button
+                          onClick={() => handleModifyOrder('offset')}
+                          className={`py-2 rounded border transition-all bg-amber-950/20 border-amber-900/40 hover:bg-amber-900/30 text-amber-400 font-extrabold`}
+                        >
+                          Move Offset
+                        </button>
+                      </div>
+
+                      {/* Cancel Order */}
+                      <button
+                        onClick={handleCancelSelectedOrder}
+                        className="w-full py-2.5 rounded-lg border border-rose-900/50 hover:bg-rose-950/30 text-rose-500 dark:text-rose-400 text-[10px] font-bold tracking-wider transition-all flex items-center justify-center gap-2 active:scale-95 mt-2"
+                      >
+                        <XOctagon size={12} className="animate-pulse text-rose-500" />
+                        CANCEL WORKING ORDER
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-3">
+                      {/* Elegant information card stating no pending orders */}
+                      <div className={`p-4 rounded-lg border text-center transition-all ${
+                        theme === 'dark' ? 'bg-neutral-950/50 border-neutral-900 text-neutral-500' : 'bg-neutral-50 border-neutral-250 text-neutral-450'
+                      }`}>
+                        <p className="text-xs font-semibold">No active pending order for {selectedSymbol || 'selected symbol'}</p>
+                      </div>
+
+                      {/* Quick select list of other symbols with pending orders */}
+                      {referenceAccount?.orders && referenceAccount.orders.length > 0 ? (
+                        <div className="flex flex-col gap-1.5">
+                          <span className={`text-[9px] px-1 font-bold ${theme === 'dark' ? 'text-neutral-500' : 'text-neutral-450'}`}>
+                            Symbols with Working Orders:
+                          </span>
+                          <div className="flex flex-wrap gap-2">
+                            {Array.from(new Set(referenceAccount.orders.map(o => o.displaySymbol || o.symbol))).map(sym => (
+                              <button
+                                key={sym}
+                                onClick={() => setSelectedSymbol(sym)}
+                                className={`px-2.5 py-1 rounded text-[9px] font-bold border transition-all active:scale-95 ${
+                                  theme === 'dark'
+                                    ? 'bg-neutral-900 border-neutral-850 hover:border-neutral-700 text-neutral-300'
+                                    : 'bg-white border-neutral-250 hover:border-neutral-350 text-neutral-800'
+                                }`}
+                              >
+                                {sym}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-center text-[9px] opacity-65">
+                          No pending orders active across any symbol.
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {executionTab === 'manage' && (
+                <div className="flex flex-col gap-4">
+                  {activePosition ? (
+                    <div className="flex flex-col gap-3">
+                      {/* Active Position Details */}
+                      <div className={`p-3 rounded-lg border flex flex-col gap-2 font-semibold text-xs transition-all ${
+                        theme === 'dark' ? 'bg-neutral-950/70 border-neutral-900 text-neutral-250' : 'bg-neutral-50 border-neutral-200 text-neutral-800'
+                      }`}>
+                        <div className="flex justify-between items-center">
+                          <span className={`${theme === 'dark' ? 'text-neutral-500' : 'text-neutral-450'}`}>Position:</span>
+                          <span className={`px-2 py-0.5 rounded text-[9px] font-extrabold ${
+                            activePosition.direction === 'BUY'
+                              ? 'bg-emerald-950/40 text-emerald-500 border border-emerald-900/45 dark:text-emerald-400'
+                              : 'bg-rose-950/40 text-rose-500 border border-rose-900/45 dark:text-rose-400'
+                          }`}>
+                            {activePosition.direction} ({activePosition.quantity.toFixed(2)} Lots)
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className={`${theme === 'dark' ? 'text-neutral-500' : 'text-neutral-450'}`}>Avg Entry:</span>
+                          <span className="font-mono font-bold">
+                            {activePosition.avgPrice.toFixed(5)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center border-t pt-1.5 border-neutral-900/40">
+                          <span className={`${theme === 'dark' ? 'text-neutral-500' : 'text-neutral-450'}`}>Unrealized PnL:</span>
+                          <span className={`font-mono font-extrabold text-xs ${(activePosition.pnl || 0) >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                            {formatPnl(activePosition.pnl)}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Flatten Position MKT button */}
+                      <button
+                        onClick={() => handleManagePosition('flatten')}
+                        className="w-full py-2.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-extrabold tracking-wider transition-all flex items-center justify-center gap-2 active:scale-95 shadow-sm"
+                      >
+                        <XOctagon size={12} className="animate-pulse" />
+                        FLATTEN POSITION MKT
+                      </button>
+
+                      {/* Stop Loss Controls */}
+                      <div className="flex flex-col gap-2 border-t pt-2.5 border-neutral-900/40">
+                        <span className={`text-[9px] font-bold uppercase tracking-wider px-1 ${theme === 'dark' ? 'text-neutral-500' : 'text-neutral-450'}`}>
+                          Stop Loss Management
+                        </span>
+                        
+                        <button
+                          onClick={() => handleManagePosition('breakeven')}
+                          className={`w-full py-1.5 rounded font-bold text-[9px] border transition-all active:scale-95 ${
+                            theme === 'dark' ? 'bg-neutral-900 border-neutral-850 hover:border-neutral-700 text-emerald-400 hover:bg-neutral-800/40' : 'bg-white border-neutral-200 hover:border-neutral-350 text-emerald-600 font-extrabold hover:bg-neutral-50'
+                          }`}
+                        >
+                          MOVE TO BREAKEVEN (B/E)
+                        </button>
+
+                        <div className="grid grid-cols-2 gap-2 mt-1">
+                          <div className="flex flex-col gap-1">
+                            <input
+                              type="number"
+                              value={manageSlEntryPips}
+                              onChange={(e) => setManageSlEntryPips(e.target.value)}
+                              placeholder="From Entry"
+                              className={`w-full border rounded-lg px-2.5 py-1.5 text-[11px] font-mono transition-all font-semibold focus:outline-none ${
+                                theme === 'dark'
+                                  ? 'bg-neutral-900/85 border-neutral-850 text-neutral-250 focus:border-neutral-600'
+                                  : 'bg-white border-neutral-200 text-neutral-800 focus:border-neutral-400'
+                              }`}
+                            />
+                            <button
+                              onClick={() => handleManagePosition('sl_entry')}
+                              className="py-1 rounded bg-neutral-900 hover:bg-neutral-850 text-neutral-300 text-[8px] font-bold uppercase border border-neutral-850 active:scale-95 transition-all"
+                            >
+                              SL from Entry
+                            </button>
+                          </div>
+
+                          <div className="flex flex-col gap-1">
+                            <input
+                              type="number"
+                              value={manageSlMidPips}
+                              onChange={(e) => setManageSlMidPips(e.target.value)}
+                              placeholder="From Mid"
+                              className={`w-full border rounded-lg px-2.5 py-1.5 text-[11px] font-mono transition-all font-semibold focus:outline-none ${
+                                theme === 'dark'
+                                  ? 'bg-neutral-900/85 border-neutral-855 text-neutral-250 focus:border-neutral-600'
+                                  : 'bg-white border-neutral-200 text-neutral-800 focus:border-neutral-400'
+                              }`}
+                            />
+                            <button
+                              onClick={() => handleManagePosition('sl_mid')}
+                              className="py-1 rounded bg-neutral-900 hover:bg-neutral-850 text-neutral-300 text-[8px] font-bold uppercase border border-neutral-855 active:scale-95 transition-all"
+                            >
+                              SL from Mid
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Take Profit Controls */}
+                      <div className="flex flex-col gap-2 border-t pt-2.5 border-neutral-900/40">
+                        <span className={`text-[9px] font-bold uppercase tracking-wider px-1 ${theme === 'dark' ? 'text-neutral-500' : 'text-neutral-450'}`}>
+                          Take Profit Management
+                        </span>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="flex flex-col gap-1">
+                            <input
+                              type="number"
+                              value={manageTpEntryPips}
+                              onChange={(e) => setManageTpEntryPips(e.target.value)}
+                              placeholder="From Entry"
+                              className={`w-full border rounded-lg px-2.5 py-1.5 text-[11px] font-mono transition-all font-semibold focus:outline-none ${
+                                theme === 'dark'
+                                  ? 'bg-neutral-900/85 border-neutral-850 text-neutral-250 focus:border-neutral-600'
+                                  : 'bg-white border-neutral-200 text-neutral-800 focus:border-neutral-400'
+                              }`}
+                            />
+                            <button
+                              onClick={() => handleManagePosition('tp_entry')}
+                              className="py-1 rounded bg-neutral-900 hover:bg-neutral-850 text-neutral-300 text-[8px] font-bold uppercase border border-neutral-850 active:scale-95 transition-all"
+                            >
+                              TP from Entry
+                            </button>
+                          </div>
+
+                          <div className="flex flex-col gap-1">
+                            <input
+                              type="number"
+                              value={manageTpMidPips}
+                              onChange={(e) => setManageTpMidPips(e.target.value)}
+                              placeholder="From Mid"
+                              className={`w-full border rounded-lg px-2.5 py-1.5 text-[11px] font-mono transition-all font-semibold focus:outline-none ${
+                                theme === 'dark'
+                                  ? 'bg-neutral-900/85 border-neutral-850 text-neutral-250 focus:border-neutral-600'
+                                  : 'bg-white border-neutral-200 text-neutral-800 focus:border-neutral-400'
+                              }`}
+                            />
+                            <button
+                              onClick={() => handleManagePosition('tp_mid')}
+                              className="py-1 rounded bg-neutral-900 hover:bg-neutral-850 text-neutral-300 text-[8px] font-bold uppercase border border-neutral-850 active:scale-95 transition-all"
+                            >
+                              TP from Mid
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-3">
+                      {/* Elegant information card stating no positions open */}
+                      <div className={`p-4 rounded-lg border text-center transition-all ${
+                        theme === 'dark' ? 'bg-neutral-950/50 border-neutral-900 text-neutral-500' : 'bg-neutral-50 border-neutral-250 text-neutral-450'
+                      }`}>
+                        <p className="text-xs font-semibold">No active position for {selectedSymbol || 'selected symbol'}</p>
+                      </div>
+
+                      {/* Quick select list of other symbols with open positions */}
+                      {referenceAccount?.positions && referenceAccount.positions.length > 0 ? (
+                        <div className="flex flex-col gap-1.5">
+                          <span className={`text-[9px] px-1 font-bold ${theme === 'dark' ? 'text-neutral-500' : 'text-neutral-450'}`}>
+                            Symbols with Active Positions:
+                          </span>
+                          <div className="flex flex-wrap gap-2">
+                            {Array.from(new Set(referenceAccount.positions.map(p => p.displaySymbol || p.symbol))).map(sym => (
+                              <button
+                                key={sym}
+                                onClick={() => setSelectedSymbol(sym)}
+                                className={`px-2.5 py-1 rounded text-[9px] font-bold border transition-all active:scale-95 ${
+                                  theme === 'dark'
+                                    ? 'bg-neutral-900 border-neutral-850 hover:border-neutral-700 text-neutral-300'
+                                    : 'bg-white border-neutral-250 hover:border-neutral-350 text-neutral-800'
+                                }`}
+                              >
+                                {sym}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-center text-[9px] opacity-65">
+                          No active positions across any symbol.
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Quick Metrics */}

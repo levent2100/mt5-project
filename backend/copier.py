@@ -20,18 +20,54 @@ class TradeCopier:
         logger.info(f"Retrieved {len(active_accs)} active accounts for copying.")
         return active_accs
 
+    def get_reference_account(self) -> Optional[Dict[str, Any]]:
+        """Returns the reference account configuration to query system-wide metrics (e.g. ATR)."""
+        settings.load()
+        ref_name = settings.reference_acc_name
+        all_accounts = settings.get_all_accounts()
+        for acc in all_accounts:
+            if acc.get("name") == ref_name:
+                return acc
+        # Fallback to the first active MT5 account
+        active_mt5 = [acc for acc in all_accounts if acc.get("type") == "MT5" and acc.get("trade_enabled")]
+        if active_mt5:
+            return active_mt5[0]
+        return None
+
+    async def get_atr(self, symbol_global: str) -> Dict[str, Any]:
+        """Fetch ATR for a symbol from the reference account's bridge."""
+        ref_acc = self.get_reference_account()
+        if not ref_acc:
+            return {"success": False, "error": "No reference account configured or active."}
+        
+        ip_port = ref_acc.get("ip_port")
+        if not ip_port:
+            return {"success": False, "error": "Reference account has no ip_port."}
+        
+        name_conversions = ref_acc.get("NameConversions", {})
+        symbol_broker = name_conversions.get(symbol_global, symbol_global)
+        if symbol_broker == "N/A":
+            return {"success": False, "error": f"Symbol {symbol_global} is N/A on reference account."}
+            
+        client = BridgeClient(ip_port)
+        res = await client._post("getatr", {"instrument": symbol_broker})
+        if res.get("success", False):
+            # Calculate ATR in pips based on reference account's DefaultPointValue
+            raw_atr = float(res.get("atr", 0.0))
+            point_value_dict = ref_acc.get("DefaultPointValue", {})
+            point_value = float(point_value_dict.get(symbol_global, 0.0001))
+            atr_pips = raw_atr / point_value if point_value > 0 else raw_atr
+            return {
+                "success": True,
+                "instrument": symbol_global,
+                "atr_raw": raw_atr,
+                "atr_pips": atr_pips
+            }
+        return {"success": False, "error": res.get("error", "Failed to fetch ATR from bridge")}
+
     async def copy_trade(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Distribute a trade request from UI to all active accounts.
-        Payload from UI:
-        {
-          "symbol": "EURUSD",
-          "direction": "buy" or "sell",
-          "ordertype": "market",  # or limits
-          "qty": float,           # explicitly specified lots, or 0 for risk-based
-          "sl_pips": float,
-          "tp_pips": float (optional)
-        }
+        Distribute a trade request from UI to all active accounts, scaling by their DefaultPointValue.
         """
         symbol_global = payload.get("symbol", "")
         direction = payload.get("direction", "")
@@ -40,6 +76,20 @@ class TradeCopier:
         sl_pips = float(payload.get("sl_pips", 0.0))
         tp_pips = float(payload.get("tp_pips", 0.0))
         offset_pips = float(payload.get("offset_pips", 0.0))
+
+        # Enforce C++ safeguard: Stop Loss cannot be smaller than DefaultSLPips
+        settings.load()
+        default_sl_dict = settings.default_sl_pips
+        min_sl = float(default_sl_dict.get(symbol_global, 0.0))
+        if sl_pips > 0 and sl_pips < min_sl:
+            logger.info(f"Stop loss of {sl_pips} pips was below default floor of {min_sl} for {symbol_global}. Scaling up to default.")
+            sl_pips = min_sl
+        elif sl_pips == 0:
+            sl_pips = min_sl
+
+        # Default TP to 2.0 * SL if not specified
+        if tp_pips == 0 and sl_pips > 0:
+            tp_pips = 2.0 * sl_pips
 
         active_accounts = self.get_active_accounts()
         if not active_accounts:
@@ -63,39 +113,42 @@ class TradeCopier:
                 logger.info(f"Skipping trade for account {acc_name}: Symbol conversion is N/A.")
                 continue
 
-            # 2. Determine scaled lot size or risk
-            is_risk_based = acc.get("IsRiskBased", False)
-            risk_perc = float(acc.get("RiskPerc", 0.0))
+            # 2. Scale pip parameters by DefaultPointValue
+            point_value_dict = acc.get("DefaultPointValue", {})
+            point_value = float(point_value_dict.get(symbol_global, 0.0001))
+            
+            scaled_sl = sl_pips * point_value
+            scaled_tp = tp_pips * point_value
+            scaled_offset = offset_pips * point_value
+
+            # 3. Determine scaled lot size or risk
+            # Override if payload explicitly sets a custom risk percentage
+            is_risk_based = acc.get("IsRiskBased", False) or (float(payload.get("risk", 0.0)) > 0)
+            risk_perc = float(payload.get("risk", acc.get("RiskPerc", 0.0)))
             multiplier = float(acc.get("Multiplier", 1.0))
 
             trade_payload = {
                 "instrument": symbol_broker,
                 "direction": direction,
                 "ordertype": ordertype,
-                "sl_pips": sl_pips,
-                "tp_pips": tp_pips,
-                "offset_pips": offset_pips
+                "sl_pips": scaled_sl,
+                "tp_pips": scaled_tp,
+                "offset_pips": scaled_offset
             }
 
             if is_risk_based:
-                # If risk-based, specify risk percentage and set qty to 0 so the bridge calculates lots.
                 trade_payload["risk"] = risk_perc
                 trade_payload["qty"] = 0.0
             else:
-                # If explicit sizing, scale base quantity by the multiplier
                 base_qty = qty_ui
                 if base_qty <= 0:
-                    # Fallback to account's DefaultLotSizes
                     default_lots = acc.get("DefaultLotSizes", {})
                     base_qty = float(default_lots.get(symbol_global, 1.0))
                 
                 trade_payload["qty"] = base_qty * multiplier
                 trade_payload["risk"] = 0.0
 
-            # Create httpx client wrapper for this account
             client = BridgeClient(ip_port)
-            
-            # Pack as a single trade payload inside the list required by handle_trade in mt5_http_bridge1.py
             tasks.append(client.execute_trade([trade_payload]))
             account_names.append(acc_name)
 
@@ -129,6 +182,130 @@ class TradeCopier:
         return {
             "success": overall_success,
             "message": message,
+            "details": summary_results
+        }
+
+    async def copy_modify_order(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Concurrently modify pending orders across all active accounts."""
+        symbol_global = payload.get("symbol")
+        new_price_type = payload.get("new_price_type", "").lower()
+        offset_pips = float(payload.get("offset_pips", 0.0))
+
+        if not symbol_global or not new_price_type:
+            return {"success": False, "message": "Missing 'symbol' or 'new_price_type' in payload."}
+
+        active_accounts = self.get_active_accounts()
+        if not active_accounts:
+            return {"success": False, "message": "No active trading accounts configured."}
+
+        tasks = []
+        account_names = []
+
+        for acc in active_accounts:
+            acc_name = acc.get("name", "Unknown")
+            ip_port = acc.get("ip_port")
+            if not ip_port:
+                continue
+
+            name_conversions = acc.get("NameConversions", {})
+            symbol_broker = name_conversions.get(symbol_global, symbol_global)
+            if symbol_broker == "N/A":
+                continue
+
+            # Scale offset_pips by account's DefaultPointValue
+            point_value_dict = acc.get("DefaultPointValue", {})
+            point_value = float(point_value_dict.get(symbol_global, 0.0001))
+            scaled_offset = offset_pips * point_value
+
+            client = BridgeClient(ip_port)
+            tasks.append(client.modify_order(symbol_broker, new_price_type, scaled_offset))
+            account_names.append(acc_name)
+
+        if not tasks:
+            return {"success": False, "message": "No active accounts to modify pending orders."}
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        summary_results = []
+        for name, res in zip(account_names, results):
+            if isinstance(res, Exception):
+                summary_results.append({"account": name, "success": False, "error": str(res)})
+            else:
+                summary_results.append({
+                    "account": name,
+                    "success": res.get("success", False),
+                    "message": res.get("message", res.get("error", ""))
+                })
+
+        return {
+            "success": all(r["success"] for r in summary_results),
+            "message": f"Modify order completed across {len(summary_results)} active accounts.",
+            "details": summary_results
+        }
+
+    async def copy_manage_position_stops(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Concurrently update position stop loss / take profit across active accounts."""
+        symbol_global = payload.get("symbol")
+        if not symbol_global:
+            return {"success": False, "message": "Missing 'symbol' in payload."}
+
+        active_accounts = self.get_active_accounts()
+        if not active_accounts:
+            return {"success": False, "message": "No active trading accounts configured."}
+
+        tasks = []
+        account_names = []
+
+        for acc in active_accounts:
+            acc_name = acc.get("name", "Unknown")
+            ip_port = acc.get("ip_port")
+            if not ip_port:
+                continue
+
+            name_conversions = acc.get("NameConversions", {})
+            symbol_broker = name_conversions.get(symbol_global, symbol_global)
+            if symbol_broker == "N/A":
+                continue
+
+            # Scale sl/tp values by account's DefaultPointValue if they are pip-based
+            point_value_dict = acc.get("DefaultPointValue", {})
+            point_value = float(point_value_dict.get(symbol_global, 0.0001))
+
+            sl_payload = None
+            if "sl" in payload:
+                sl_payload = payload["sl"].copy()
+                if sl_payload.get("type") in ["pips_from_entry", "pips_from_mid"]:
+                    sl_payload["value"] = float(sl_payload.get("value", 0.0)) * point_value
+
+            tp_payload = None
+            if "tp" in payload:
+                tp_payload = payload["tp"].copy()
+                if tp_payload.get("type") in ["pips_from_entry", "pips_from_mid"]:
+                    tp_payload["value"] = float(tp_payload.get("value", 0.0)) * point_value
+
+            client = BridgeClient(ip_port)
+            tasks.append(client.manage_position_stops(symbol_broker, sl_payload, tp_payload))
+            account_names.append(acc_name)
+
+        if not tasks:
+            return {"success": False, "message": "No active accounts to manage position stops."}
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        summary_results = []
+        for name, res in zip(account_names, results):
+            if isinstance(res, Exception):
+                summary_results.append({"account": name, "success": False, "error": str(res)})
+            else:
+                summary_results.append({
+                    "account": name,
+                    "success": res.get("success", False),
+                    "message": res.get("message", res.get("error", ""))
+                })
+
+        return {
+            "success": all(r["success"] for r in summary_results),
+            "message": f"Manage position stops completed across {len(summary_results)} active accounts.",
             "details": summary_results
         }
 
@@ -212,21 +389,6 @@ class TradeCopier:
             if symbol_broker:
                 tasks.append(client.cancel_order(symbol_broker))
             else:
-                # The bridge does not have a generic cancel_all_pending endpoint except through cancel_and_flatten.
-                # However, mt5_http_bridge1.py handle_cancel_flatten checks target_instrument.
-                # If target_instrument is None, it flattens both orders and positions.
-                # To ONLY cancel pending orders when symbol is None, we can call cancel_and_flatten on each bridge
-                # but mt5_http_bridge1.py flattens positions too when cancelandflatten is called.
-                # Let's check mt5_http_bridge1.py's implementation of cancel_and_flatten:
-                # it does sum(1 for o in orders_to_cancel ... TRADE_ACTION_REMOVE) AND close_mt5_position for positions.
-                # Is there a way to only cancel orders?
-                # Ah! Bridge has handle_cancel_order which calls mt5.orders_get(symbol=instrument) and removes it.
-                # If we want to cancel ALL pending orders across all symbols, we can fetch the account status to find all orders,
-                # then cancel them one by one.
-                # But to keep it simple and robust, let's fetch account status, extract pending order symbols, and cancel them.
-                # Better yet, since we have the bridge accountstatus response, we can find out what instruments have pending orders.
-                # Let's query them. Or we can just call cancel_and_flatten which covers flattening.
-                # Let's implement active cancel by first fetching status.
                 pass
             account_names.append(acc_name)
 
