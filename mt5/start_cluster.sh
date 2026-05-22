@@ -30,6 +30,14 @@ if [ ! -d "/config/.wine/drive_c/Python310" ]; then
     cd /root
 fi
 
+# --- DYNAMIC INSTALLATION ENDS HERE ---
+
+# FIX: Clean up stale X11 lock files from previous stops/crashes
+echo "Cleaning up any leftover X11 lock files..."
+rm -f /tmp/.X1-lock
+rm -f /tmp/.X11-unix/X1
+# -----------------------------------------------------------
+
 echo "1. Starting Virtual Framebuffer (Xvfb)..."
 Xvfb :1 -screen 0 1024x768x24 &
 sleep 2
@@ -40,6 +48,12 @@ sleep 1
 
 echo "2b. Starting Tint2 Taskbar Panel..."
 tint2 &
+sleep 1
+
+# FIX: Start clipboard synchronization managers [1]
+echo "2c. Starting Clipboard Managers..."
+autocutsel -fork
+autocutsel -s PRIMARY -fork
 sleep 1
 
 echo "3. Starting VNC Server..."
@@ -128,7 +142,7 @@ fi
 # =====================================================================
 echo "6. Starting Custom HTTP Bridges..."
 
-# Bridge 1 - Port 58809 (Active by default)
+# Bridge 1 - Port 58801 (Active by default)
 if [ -f "/root/scripts/mt5_http_bridge1.py" ]; then
     wine /config/.wine/drive_c/Python310/python.exe /root/scripts/mt5_http_bridge1.py &
     sleep 1

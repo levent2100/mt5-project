@@ -32,6 +32,7 @@ RUN apt-get update && apt-get install -y \
     unzip \
     xterm \
     tint2 \
+    autocutsel \
     libgnutls30:i386 \
     && rm -rf /var/lib/apt/lists/*
 
@@ -52,12 +53,12 @@ WORKDIR /root/
 RUN mkdir -p /config
 
 # Copy configurations and startup scripts
-COPY ./mt5/start_cluster.sh /root/start_cluster.sh
-RUN chmod +x /root/start_cluster.sh
+# COPY ./mt5/start_cluster.sh /root/start_cluster.sh
+# RUN chmod +x /root/start_cluster.sh
 COPY ./mt5/supervisord.conf /etc/supervisor/conf.d/mt5.conf
 
 # Port mappings inside the container
 EXPOSE 8080
-EXPOSE 58809-58818
+EXPOSE 58801-58810
 
 CMD ["/usr/bin/supervisord"]

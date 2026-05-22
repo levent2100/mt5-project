@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   mt5-container:
     build:
@@ -14,8 +12,7 @@ services:
       # Mount your host scripts folder inside the container
       - /pjt_src/stockai/mt5code:/root/scripts
     ports:
-      - "127.0.0.1:58809-58818:58809-58818"  # Mapped ports for your 10 custom HTTP Python scripts
-      - "127.0.0.1:8080:8080"                # Secure noVNC Port
+      - "127.0.0.1:58801-58810:58801-58810" # Mapped ports for your 10 custom HTTP Python scripts
+      - "127.0.0.1:8080:8080" # Secure noVNC Port
       - "127.0.0.1:5900:5900"
     restart: always
-    
