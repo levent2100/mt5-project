@@ -189,6 +189,11 @@ export default function Dashboard() {
   const wsRef = useRef<WebSocket | null>(null);
   const pendingRequests = useRef<Record<string, { resolve: (data: any) => void; reject: (err: any) => void; timeout: NodeJS.Timeout }>>({});
 
+  const selectedSymbolRef = useRef<string>("");
+  useEffect(() => {
+    selectedSymbolRef.current = selectedSymbol;
+  }, [selectedSymbol]);
+
   // --- Helper: Render dynamic HSL alerts ---
   const triggerAlert = (text: string, type: 'success' | 'danger' | 'info' | 'warning' = 'info') => {
     setAlertMessage({ text, type });
@@ -254,6 +259,7 @@ export default function Dashboard() {
         sendRequest('subscribe_multi_account').catch(e => addLog(`Sub error: ${e}`, 'UI-WS', 'error'));
         sendRequest('subscribe_spreads').catch(e => addLog(`Sub error: ${e}`, 'UI-WS', 'error'));
         sendRequest('subscribe_logs').catch(e => addLog(`Sub error: ${e}`, 'UI-WS', 'error'));
+        sendRequest('subscribe_atr').catch(e => addLog(`Sub error: ${e}`, 'UI-WS', 'error'));
       };
 
       socket.onmessage = (event) => {
@@ -352,6 +358,15 @@ export default function Dashboard() {
                     payload.data.source || 'Server', 
                     payload.data.type || 'info'
                   );
+                }
+                break;
+              case 'atr_update':
+                if (payload.data?.atr) {
+                  const atrData = payload.data.atr;
+                  const currentSymbol = selectedSymbolRef.current;
+                  if (currentSymbol && atrData[currentSymbol]) {
+                    setAtrInfo(atrData[currentSymbol]);
+                  }
                 }
                 break;
                 
@@ -2056,7 +2071,6 @@ export default function Dashboard() {
                         <th className="pb-2.5 px-3">Account / ID</th>
                         <th className="pb-2.5 px-3">Status</th>
                         <th className="pb-2.5 px-3">Copy Action</th>
-                        <th className="pb-2.5 px-3 text-right">Multiplier</th>
                         <th className="pb-2.5 px-3 text-right">Alloc Risk</th>
                         <th className="pb-2.5 px-3 text-right">Equity Balance</th>
                         <th className="pb-2.5 px-3 text-right">Free Margin</th>
@@ -2121,9 +2135,6 @@ export default function Dashboard() {
                                 }`}>
                                   {acc.trade_enabled ? 'Active' : 'Disabled'}
                                 </span>
-                              </td>
-                              <td className={`py-2.5 px-3 text-right font-mono text-xs ${theme === 'dark' ? 'text-neutral-300' : 'text-neutral-600'}`}>
-                                {acc.multiplier !== undefined ? `x${acc.multiplier.toFixed(1)}` : 'N/A'}
                               </td>
                               <td className={`py-2.5 px-3 text-right font-mono text-xs ${theme === 'dark' ? 'text-neutral-450' : 'text-neutral-500'}`}>
                                 {acc.riskPerc !== undefined ? `${acc.riskPerc}%` : 'N/A'}

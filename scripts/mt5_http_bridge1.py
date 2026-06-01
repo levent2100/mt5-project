@@ -150,8 +150,55 @@ def get_volume_digits(symbol_info_volume_step):
     except Exception:
         return 8
 
+def get_max_volume_for_leverage(symbol_info, price, account_info):
+    """
+    Calculates the maximum lot size allowed under the account's leverage/margin constraints.
+    Capped at 95% of the account balance to avoid margin errors on minor fluctuations.
+    """
+    try:
+        # Use 95% of the account balance as the max allowed margin
+        allowed_margin = float(account_info.balance) * 0.95
+        
+        # 1. Try using MT5's built-in order_calc_margin
+        # Use ORDER_TYPE_BUY as standard since leverage is usually symmetric
+        margin_1_lot = mt5.order_calc_margin(mt5.ORDER_TYPE_BUY, symbol_info.name, 1.0, price)
+        if margin_1_lot is not None and margin_1_lot > 0:
+            max_vol = allowed_margin / float(margin_1_lot)
+            logging.info(f"Max volume for {symbol_info.name} by order_calc_margin: {max_vol} (1 lot margin: {margin_1_lot})")
+            return max_vol
+    except Exception as e:
+        logging.warning(f"Error using order_calc_margin for leverage calculation: {e}")
+
+    # 2. Fallback to manual leverage calculation if order_calc_margin fails
+    try:
+        leverage = float(account_info.leverage)
+        if leverage <= 0:
+            leverage = 100.0  # Safe fallback
+        
+        contract_size = float(symbol_info.trade_contract_size)
+        if contract_size <= 0:
+            return None
+        
+        # Determine profit currency to account currency conversion
+        conv_rate, err = _get_conversion_rate(account_info.currency, symbol_info.currency_margin)
+        if err or conv_rate is None:
+            conv_rate, err = _get_conversion_rate(account_info.currency, symbol_info.currency_profit)
+            if err or conv_rate is None:
+                conv_rate = Decimal("1.0")
+        
+        price_dec = Decimal(str(price))
+        margin_1_lot_manual = (Decimal(str(contract_size)) * price_dec) / (Decimal(str(leverage)) * conv_rate)
+        if margin_1_lot_manual > 0:
+            max_vol = float(Decimal(str(allowed_margin)) / margin_1_lot_manual)
+            logging.info(f"Max volume for {symbol_info.name} by manual leverage: {max_vol} (1 lot margin manual: {margin_1_lot_manual})")
+            return max_vol
+    except Exception as e:
+        logging.error(f"Error in manual leverage fallback calculation: {e}")
+        
+    return None
+
 def normalize_explicit_volume(requested_qty_str, symbol_info_obj):
-    """ Normalizes a requested volume according to the symbol's min, max, and step rules. """
+    """ Normalizes a requested volume according to the symbol's min, max, step and leverage rules. """
     try:
         requested_qty = Decimal(str(requested_qty_str))
         min_v = Decimal(str(symbol_info_obj.volume_min))
@@ -170,6 +217,19 @@ def normalize_explicit_volume(requested_qty_str, symbol_info_obj):
                 # Use the smaller of the two maximums: the one from the broker (MT5) or our custom override.
                 if max_v > override_dec:
                     max_v = override_dec
+        
+        # Check account max leverage dynamically and enforce a 95% margin volume cap
+        account_info = mt5.account_info()
+        if account_info:
+            tick = mt5.symbol_info_tick(symbol_name)
+            if tick and tick.ask > 0:
+                price = tick.ask
+                max_leverage_vol = get_max_volume_for_leverage(symbol_info_obj, price, account_info)
+                if max_leverage_vol is not None and max_leverage_vol > 0:
+                    lev_vol_dec = Decimal(str(max_leverage_vol))
+                    if max_v > lev_vol_dec:
+                        logging.warning(f"[LEVERAGE CAP] Capping maximum volume for {symbol_name} at {lev_vol_dec} based on 95% leverage limit (broker max: {symbol_info_obj.volume_max})")
+                        max_v = lev_vol_dec
         # --- MODIFICATION END ---
         
         if min_v <= 0 and requested_qty <= 0: return 0.0, None
@@ -277,44 +337,86 @@ def get_latest_server_time():
         if tick and tick.time > latest_time: latest_time = tick.time
     return latest_time or int(time.time())
 
+_atr_cache = {}
+_atr_cache_lock = threading.Lock()
+
 def calculate_atr(symbol, period=14):
     """
     Calculates advanced ATR on 1-minute chart:
-    - Long_ATR (7200 bars on M1)
-    - Mid_ATR (14 bars on M1)
-    - Short_ATR (5 bars on M1)
-    - Spread10x (10 * current spread)
+    - Long_ATR (7200 bars on M1) [Cached per M1 bar]
+    - Mid_ATR (14 bars on M1) [Cached per M1 bar]
+    - Short_ATR (5 bars on M1) [Cached per M1 bar]
+    - Spread10x (10 * current spread) [Calculated instantly]
     Returns the maximum of these 4 values.
     """
-    rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M1, 0, 7500)
-    if rates is None or len(rates) < 15:
-        logging.error(f"Failed to copy rates for {symbol} on M1. rates count: {len(rates) if rates is not None else 0}")
-        return None
-
-    high = np.array([float(bar['high']) for bar in rates], dtype=np.float64)
-    low = np.array([float(bar['low']) for bar in rates], dtype=np.float64)
-    close = np.array([float(bar['close']) for bar in rates], dtype=np.float64)
-
-    # Short_ATR (5 bars)
-    short_atr_vals = talib.ATR(high, low, close, timeperiod=5)
-    short_atr = float(short_atr_vals[-1]) if short_atr_vals is not None and len(short_atr_vals) > 0 and not np.isnan(short_atr_vals[-1]) else 0.0
-
-    # Mid_ATR (14 bars)
-    mid_atr_vals = talib.ATR(high, low, close, timeperiod=14)
-    mid_atr = float(mid_atr_vals[-1]) if mid_atr_vals is not None and len(mid_atr_vals) > 0 and not np.isnan(mid_atr_vals[-1]) else 0.0
-
-    # Long_ATR (7200 bars)
-    long_period = 7200
-    if len(rates) < long_period + 1:
-        long_period = len(rates) - 1
+    global _atr_cache
     
-    if long_period >= 5:
-        long_atr_vals = talib.ATR(high, low, close, timeperiod=long_period)
-        long_atr = float(long_atr_vals[-1]) if long_atr_vals is not None and len(long_atr_vals) > 0 and not np.isnan(long_atr_vals[-1]) else 0.0
+    # Try fetching the latest M1 bar timestamp
+    rates_latest = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M1, 0, 1)
+    if rates_latest is None or len(rates_latest) == 0:
+        logging.error(f"Failed to copy latest M1 rate for {symbol}. Error: {mt5.last_error()}")
+        with _atr_cache_lock:
+            cached = _atr_cache.get(symbol)
+        if cached:
+            long_atr = cached["long_atr"]
+            mid_atr = cached["mid_atr"]
+            short_atr = cached["short_atr"]
+        else:
+            return None
     else:
-        long_atr = 0.0
+        latest_time = int(rates_latest[0]['time'])
+        
+        with _atr_cache_lock:
+            cached = _atr_cache.get(symbol)
+            
+        if cached and cached.get("last_bar_time") == latest_time:
+            long_atr = cached["long_atr"]
+            mid_atr = cached["mid_atr"]
+            short_atr = cached["short_atr"]
+        else:
+            # Cache miss or expired M1 bar, recalculate historical components
+            rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M1, 0, 7500)
+            if rates is None or len(rates) < 15:
+                logging.error(f"Failed to copy historical rates for {symbol} on M1. Error: {mt5.last_error()}")
+                if cached:
+                    long_atr = cached["long_atr"]
+                    mid_atr = cached["mid_atr"]
+                    short_atr = cached["short_atr"]
+                else:
+                    return None
+            else:
+                high = np.array([float(bar['high']) for bar in rates], dtype=np.float64)
+                low = np.array([float(bar['low']) for bar in rates], dtype=np.float64)
+                close = np.array([float(bar['close']) for bar in rates], dtype=np.float64)
 
-    # Spread10x
+                # Short_ATR (5 bars)
+                short_atr_vals = talib.ATR(high, low, close, timeperiod=5)
+                short_atr = float(short_atr_vals[-1]) if short_atr_vals is not None and len(short_atr_vals) > 0 and not np.isnan(short_atr_vals[-1]) else 0.0
+
+                # Mid_ATR (14 bars)
+                mid_atr_vals = talib.ATR(high, low, close, timeperiod=14)
+                mid_atr = float(mid_atr_vals[-1]) if mid_atr_vals is not None and len(mid_atr_vals) > 0 and not np.isnan(mid_atr_vals[-1]) else 0.0
+
+                # Long_ATR (7200 bars)
+                long_period = 7200
+                if len(rates) < long_period + 1:
+                    long_period = len(rates) - 1
+                
+                if long_period >= 5:
+                    long_atr_vals = talib.ATR(high, low, close, timeperiod=long_period)
+                    long_atr = float(long_atr_vals[-1]) if long_atr_vals is not None and len(long_atr_vals) > 0 and not np.isnan(long_atr_vals[-1]) else 0.0
+                else:
+                    long_atr = 0.0
+
+                with _atr_cache_lock:
+                    _atr_cache[symbol] = {
+                        "last_bar_time": latest_time,
+                        "long_atr": long_atr,
+                        "mid_atr": mid_atr,
+                        "short_atr": short_atr
+                    }
+
+    # Fetch live tick spread instantly (every second/tick)
     tick = mt5.symbol_info_tick(symbol)
     if tick and tick.ask > 0 and tick.bid > 0:
         spread = tick.ask - tick.bid

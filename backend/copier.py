@@ -57,6 +57,18 @@ class TradeCopier:
             point_value_dict = ref_acc.get("DefaultPointValue", {})
             point_value = float(point_value_dict.get(symbol_global, 0.0001))
             atr_pips = raw_atr / point_value if point_value > 0 else raw_atr
+            
+            # Dynamic Floor Safety Constraint: 2x ATR cannot be smaller than DefaultSLPips
+            settings.load()
+            default_sl_dict = settings.default_sl_pips
+            default_sl = float(default_sl_dict.get(symbol_global, 0.0))
+            if default_sl > 0:
+                min_atr_pips = default_sl / 2.0
+                if atr_pips < min_atr_pips:
+                    logger.info(f"[ATR FLOOR] Capping atr_pips for {symbol_global} at {min_atr_pips} (calculated: {atr_pips}) to satisfy 2x ATR >= {default_sl} pips.")
+                    atr_pips = min_atr_pips
+                    raw_atr = atr_pips * point_value
+            
             return {
                 "success": True,
                 "instrument": symbol_global,
@@ -152,7 +164,7 @@ class TradeCopier:
                     default_lots = acc.get("DefaultLotSizes", {})
                     base_qty = float(default_lots.get(symbol_global, 1.0))
                 
-                trade_payload["qty"] = base_qty * multiplier
+                trade_payload["qty"] = base_qty
                 trade_payload["risk"] = 0.0
 
             client = BridgeClient(ip_port)

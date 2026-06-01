@@ -14,17 +14,17 @@
         "BTC"
     ],
     "DefaultSLPips": {
-        "EURUSD": 25.0,
-        "GBPUSD": 35.0,
-        "USDJPY": 35.0,
-        "EURJPY": 35.0,
-        "GBPJPY": 35.0,
-        "SP500": 20.0,
-        "DAX40": 80.0,
-        "FTSE100": 30.0,
-        "NQ100": 100.0,
-        "GOLD": 20.0,
-        "BTC": 100.0
+        "EURUSD": 10.0,
+        "GBPUSD": 20.0,
+        "USDJPY": 20.0,
+        "EURJPY": 20.0,
+        "GBPJPY": 20.0,
+        "SP500": 5.0,
+        "DAX40": 20.0,
+        "FTSE100": 38.0,
+        "NQ100": 20.0,
+        "GOLD": 50.0,
+        "BTC": 25.0
     },
     "ReferenceAccType": "MT5Accounts",
     "ReferenceAccName": "25329254",
@@ -85,7 +85,7 @@
                 "Multiplier": 10,
                 "ip_port": "http://127.0.0.1:58801",
                 "ExePath": "C:\\Program Files\\MetaTrader 5_1\\terminal64.exe",
-                "RiskPerc": 20.0,
+                "RiskPerc": 5.0,
                 "IsRiskBased": true,
                 "NameConversions": {
                     "EURUSD": "EURUSD",

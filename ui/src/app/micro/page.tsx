@@ -37,6 +37,11 @@ export default function MicroPanel() {
   const sellBtnRef = useRef<HTMLButtonElement>(null);
   const flattenBtnRef = useRef<HTMLButtonElement>(null);
 
+  const selectedSymbolRef = useRef<string>("");
+  useEffect(() => {
+    selectedSymbolRef.current = selectedSymbol;
+  }, [selectedSymbol]);
+
   // Helper to show status logs or alerts
   const showStatus = (text: string, type: "success" | "danger" | "info" | "warning", duration = 4000) => {
     if (messageTimeoutRef.current) clearTimeout(messageTimeoutRef.current);
@@ -87,6 +92,7 @@ export default function MicroPanel() {
         // 3. Subscribe to active channels
         sendRequest("subscribe_account").catch(e => console.error("Sub error:", e));
         sendRequest("subscribe_logs").catch(e => console.error("Sub error:", e));
+        sendRequest("subscribe_atr").catch(e => console.error("Sub error:", e));
       };
 
       socket.onmessage = (event) => {
@@ -133,6 +139,15 @@ export default function MicroPanel() {
                     isErr ? "danger" : isSuccess ? "success" : "info",
                     isErr ? 6000 : 3000
                   );
+                }
+                break;
+              case "atr_update":
+                if (payload.data?.atr) {
+                  const atrData = payload.data.atr;
+                  const currentSymbol = selectedSymbolRef.current;
+                  if (currentSymbol && atrData[currentSymbol]) {
+                    setAtrPips(parseFloat(atrData[currentSymbol].atr_pips));
+                  }
                 }
                 break;
             }

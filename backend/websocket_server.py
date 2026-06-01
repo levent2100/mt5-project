@@ -42,7 +42,8 @@ class ConnectionManager:
             "reference_account": set(),
             "multi_account": set(),
             "logs": set(),
-            "spreads": set()
+            "spreads": set(),
+            "atr": set()
         }
 
     async def connect(self, websocket: WebSocket):
@@ -330,6 +331,40 @@ async def poll_spreads():
         
         await asyncio.sleep(1.0)
 
+async def poll_atr():
+    """Polls live ATR for all active/configured symbols concurrently and broadcasts updates every second."""
+    while True:
+        try:
+            # Only poll if there are active subscribers to "atr" channel
+            if manager.subscriptions.get("atr"):
+                settings.load()
+                symbols = settings.global_names
+                
+                # Fetch ATR for all symbols concurrently using copier.get_atr
+                tasks = [copier.get_atr(sym) for sym in symbols]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                
+                mapped_atr = {}
+                for sym, res in zip(symbols, results):
+                    if isinstance(res, dict) and res.get("success"):
+                        mapped_atr[sym] = {
+                            "atr_raw": res.get("atr_raw"),
+                            "atr_pips": res.get("atr_pips")
+                        }
+                    else:
+                        mapped_atr[sym] = None
+                
+                await manager.broadcast_to_channel("atr", {
+                    "type": "atr_update",
+                    "data": {
+                        "atr": mapped_atr
+                    }
+                })
+        except Exception as e:
+            logger.error(f"Error in poll_atr loop: {e}")
+        
+        await asyncio.sleep(1.0)
+
 # --- WebSocket Route Entry ---
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -372,6 +407,14 @@ async def websocket_endpoint(websocket: WebSocket):
                         "requestId": req_id,
                         "status": "ok",
                         "data": {"message": "Subscribed to live spreads updates."}
+                    }, websocket)
+
+                elif command == "subscribe_atr":
+                    manager.subscribe(websocket, "atr")
+                    await manager.send_personal_message({
+                        "requestId": req_id,
+                        "status": "ok",
+                        "data": {"message": "Subscribed to live ATR updates."}
                     }, websocket)
 
                 elif command == "subscribe_logs":

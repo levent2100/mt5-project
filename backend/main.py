@@ -2,7 +2,7 @@ import asyncio
 import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from backend.websocket_server import router as ws_router, poll_reference_account, poll_multi_accounts, poll_spreads, log_activity
+from backend.websocket_server import router as ws_router, poll_reference_account, poll_multi_accounts, poll_spreads, poll_atr, log_activity
 
 # Setup logging
 logging.basicConfig(
@@ -37,6 +37,7 @@ async def startup_event():
     asyncio.create_task(poll_reference_account())
     asyncio.create_task(poll_multi_accounts())
     asyncio.create_task(poll_spreads())
+    asyncio.create_task(poll_atr())
     
     await log_activity("Backend service initialized on port 9999. Ready to route commands.", source="System")
     logger.info("Service successfully started. Waiting for connections...")
