@@ -79,6 +79,13 @@ interface SpreadAccount {
   defaultpointvalue: Record<string, number>;
 }
 
+const safeParseFloat = (val: any, defaultVal: number = 0): number => {
+  if (val === undefined || val === null) return defaultVal;
+  const str = String(val).replace(',', '.').trim();
+  const parsed = parseFloat(str);
+  return isNaN(parsed) ? defaultVal : parsed;
+};
+
 export default function Dashboard() {
   // Theme State & Persistent Dark Mode Toggle
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
@@ -445,7 +452,7 @@ export default function Dashboard() {
       setSlPips(slString);
       setLimitSlPips(slString);
       
-      const slFloat = parseFloat(slString);
+      const slFloat = safeParseFloat(slString);
       setLimitTpPips((slFloat * 2.0).toString());
       
       // Adjust forms for indexes vs currencies
@@ -526,11 +533,11 @@ export default function Dashboard() {
     handleEntryTrade(
       direction,
       'market',
-      parseFloat(slPips),
+      safeParseFloat(slPips),
       0,
       0,
       isRiskBasedInput ? 2.0 : 0,
-      parseFloat(quantity)
+      safeParseFloat(quantity)
     );
   };
 
@@ -540,7 +547,7 @@ export default function Dashboard() {
     let offsetVal = 0;
     if (newPriceType === 'offset' && pendingOrder) {
       const isBuy = pendingOrder.direction === 'BUY';
-      offsetVal = parseFloat(isBuy ? modifyOffsetBuy : modifyOffsetSell);
+      offsetVal = safeParseFloat(isBuy ? modifyOffsetBuy : modifyOffsetSell);
       if (isNaN(offsetVal) || offsetVal < 0) {
         return triggerAlert('Please input a valid offset value!', 'warning');
       }
@@ -608,19 +615,19 @@ export default function Dashboard() {
     if (type === 'breakeven') {
       payload.sl = { type: 'breakeven' };
     } else if (type === 'sl_entry') {
-      const slVal = parseFloat(manageSlEntryPips);
+      const slVal = safeParseFloat(manageSlEntryPips);
       if (isNaN(slVal) || slVal < 0) return triggerAlert('Invalid SL pips value', 'warning');
       payload.sl = { type: 'pips_from_entry', value: slVal };
     } else if (type === 'sl_mid') {
-      const slVal = parseFloat(manageSlMidPips);
+      const slVal = safeParseFloat(manageSlMidPips);
       if (isNaN(slVal) || slVal < 0) return triggerAlert('Invalid SL pips value', 'warning');
       payload.sl = { type: 'pips_from_mid', value: slVal };
     } else if (type === 'tp_entry') {
-      const tpVal = parseFloat(manageTpEntryPips);
+      const tpVal = safeParseFloat(manageTpEntryPips);
       if (isNaN(tpVal) || tpVal < 0) return triggerAlert('Invalid TP pips value', 'warning');
       payload.tp = { type: 'pips_from_entry', value: tpVal };
     } else if (type === 'tp_mid') {
-      const tpVal = parseFloat(manageTpMidPips);
+      const tpVal = safeParseFloat(manageTpMidPips);
       if (isNaN(tpVal) || tpVal < 0) return triggerAlert('Invalid TP pips value', 'warning');
       payload.tp = { type: 'pips_from_mid', value: tpVal };
     }
@@ -1162,7 +1169,7 @@ export default function Dashboard() {
                             <div className="flex justify-between border-t pt-1.5 border-neutral-800/40">
                               <span>Target SL ({atrMultiplier}x ATR):</span>
                               <span className="font-bold text-emerald-500 dark:text-emerald-400">
-                                {Math.round(atrInfo.atr_pips * parseFloat(atrMultiplier))} pips
+                                {parseFloat((atrInfo.atr_pips * safeParseFloat(atrMultiplier)).toFixed(2))} pips
                               </span>
                             </div>
                           </>
@@ -1178,8 +1185,8 @@ export default function Dashboard() {
                           disabled={!atrInfo}
                           onClick={() => {
                             if (!atrInfo) return;
-                            const calculated_atr_sl = Math.round(atrInfo.atr_pips * parseFloat(atrMultiplier));
-                            handleEntryTrade('buy', 'market', calculated_atr_sl, 0, 0, parseFloat(atrRiskPerc));
+                            const calculated_atr_sl = parseFloat((atrInfo.atr_pips * safeParseFloat(atrMultiplier)).toFixed(2));
+                            handleEntryTrade('buy', 'market', calculated_atr_sl, 0, 0, safeParseFloat(atrRiskPerc));
                           }}
                           className="py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs tracking-wide active:scale-95 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
@@ -1190,8 +1197,8 @@ export default function Dashboard() {
                           disabled={!atrInfo}
                           onClick={() => {
                             if (!atrInfo) return;
-                            const calculated_atr_sl = Math.round(atrInfo.atr_pips * parseFloat(atrMultiplier));
-                            handleEntryTrade('sell', 'market', calculated_atr_sl, 0, 0, parseFloat(atrRiskPerc));
+                            const calculated_atr_sl = parseFloat((atrInfo.atr_pips * safeParseFloat(atrMultiplier)).toFixed(2));
+                            handleEntryTrade('sell', 'market', calculated_atr_sl, 0, 0, safeParseFloat(atrRiskPerc));
                           }}
                           className="py-2.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs tracking-wide active:scale-95 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
@@ -1327,32 +1334,52 @@ export default function Dashboard() {
                           {/* BUY Grid */}
                           <div className="flex flex-col gap-1.5">
                             <button
-                              onClick={() => handleEntryTrade('buy', 'market', parseFloat(limitSlPips), parseFloat(limitTpPips), 0, limitSizingMode === 'risk' ? parseFloat(limitRiskPerc) : 0, limitSizingMode === 'lots' ? parseFloat(limitLots) : 0)}
-                              className="py-1.5 rounded bg-emerald-950/20 border border-emerald-900/40 hover:bg-emerald-900/35 text-emerald-400 transition-all"
+                              onClick={() => handleEntryTrade('buy', 'market', safeParseFloat(limitSlPips), safeParseFloat(limitTpPips), 0, limitSizingMode === 'risk' ? safeParseFloat(limitRiskPerc) : 0, limitSizingMode === 'lots' ? safeParseFloat(limitLots) : 0)}
+                              className={`py-2 rounded text-[11px] font-bold uppercase transition-all border ${
+                                theme === 'dark'
+                                  ? 'bg-emerald-950/40 border-emerald-800/80 hover:bg-emerald-900/50 text-emerald-300'
+                                  : 'bg-emerald-50 border-emerald-200 hover:bg-emerald-100 text-emerald-800'
+                              }`}
                             >
                               MKT
                             </button>
                             <button
-                              onClick={() => handleEntryTrade('buy', 'limit_ask', parseFloat(limitSlPips), parseFloat(limitTpPips), 0, limitSizingMode === 'risk' ? parseFloat(limitRiskPerc) : 0, limitSizingMode === 'lots' ? parseFloat(limitLots) : 0)}
-                              className="py-1.5 rounded bg-neutral-900 border border-neutral-800 hover:border-neutral-700 text-neutral-300 transition-all"
+                              onClick={() => handleEntryTrade('buy', 'limit_ask', safeParseFloat(limitSlPips), safeParseFloat(limitTpPips), 0, limitSizingMode === 'risk' ? safeParseFloat(limitRiskPerc) : 0, limitSizingMode === 'lots' ? safeParseFloat(limitLots) : 0)}
+                              className={`py-2 rounded text-[11px] font-bold uppercase transition-all border ${
+                                theme === 'dark'
+                                  ? 'bg-neutral-900 border-neutral-800 hover:bg-neutral-800 text-neutral-200'
+                                  : 'bg-neutral-100 border-neutral-200 hover:bg-neutral-200 text-neutral-800'
+                              }`}
                             >
                               Limit Ask
                             </button>
                             <button
-                              onClick={() => handleEntryTrade('buy', 'mid', parseFloat(limitSlPips), parseFloat(limitTpPips), 0, limitSizingMode === 'risk' ? parseFloat(limitRiskPerc) : 0, limitSizingMode === 'lots' ? parseFloat(limitLots) : 0)}
-                              className="py-1.5 rounded bg-neutral-900 border border-neutral-800 hover:border-neutral-700 text-neutral-300 transition-all"
+                              onClick={() => handleEntryTrade('buy', 'mid', safeParseFloat(limitSlPips), safeParseFloat(limitTpPips), 0, limitSizingMode === 'risk' ? safeParseFloat(limitRiskPerc) : 0, limitSizingMode === 'lots' ? safeParseFloat(limitLots) : 0)}
+                              className={`py-2 rounded text-[11px] font-bold uppercase transition-all border ${
+                                theme === 'dark'
+                                  ? 'bg-neutral-900 border-neutral-800 hover:bg-neutral-800 text-neutral-200'
+                                  : 'bg-neutral-100 border-neutral-200 hover:bg-neutral-200 text-neutral-800'
+                              }`}
                             >
                               MID
                             </button>
                             <button
-                              onClick={() => handleEntryTrade('buy', 'join_bid', parseFloat(limitSlPips), parseFloat(limitTpPips), 0, limitSizingMode === 'risk' ? parseFloat(limitRiskPerc) : 0, limitSizingMode === 'lots' ? parseFloat(limitLots) : 0)}
-                              className="py-1.5 rounded bg-neutral-900 border border-neutral-800 hover:border-neutral-700 text-neutral-350 transition-all"
+                              onClick={() => handleEntryTrade('buy', 'join_bid', safeParseFloat(limitSlPips), safeParseFloat(limitTpPips), 0, limitSizingMode === 'risk' ? safeParseFloat(limitRiskPerc) : 0, limitSizingMode === 'lots' ? safeParseFloat(limitLots) : 0)}
+                              className={`py-2 rounded text-[11px] font-bold uppercase transition-all border ${
+                                theme === 'dark'
+                                  ? 'bg-neutral-900 border-neutral-800 hover:bg-neutral-800 text-neutral-200'
+                                  : 'bg-neutral-100 border-neutral-200 hover:bg-neutral-200 text-neutral-800'
+                              }`}
                             >
                               Join Bid
                             </button>
                             <button
-                              onClick={() => handleEntryTrade('buy', 'offset_buy', parseFloat(limitSlPips), parseFloat(limitTpPips), parseFloat(entryOffsetBuy), limitSizingMode === 'risk' ? parseFloat(limitRiskPerc) : 0, limitSizingMode === 'lots' ? parseFloat(limitLots) : 0)}
-                              className="py-1.5 rounded bg-amber-950/20 border border-amber-900/40 hover:bg-amber-900/30 text-amber-400 transition-all"
+                              onClick={() => handleEntryTrade('buy', 'offset_buy', safeParseFloat(limitSlPips), safeParseFloat(limitTpPips), safeParseFloat(entryOffsetBuy), limitSizingMode === 'risk' ? safeParseFloat(limitRiskPerc) : 0, limitSizingMode === 'lots' ? safeParseFloat(limitLots) : 0)}
+                              className={`py-2 rounded text-[11px] font-bold uppercase transition-all border ${
+                                theme === 'dark'
+                                  ? 'bg-amber-950/40 border-amber-800/80 hover:bg-amber-900/50 text-amber-300'
+                                  : 'bg-amber-50 border-amber-200 hover:bg-amber-100 text-amber-800'
+                              }`}
                             >
                               Offset (+{entryOffsetBuy})
                             </button>
@@ -1361,32 +1388,52 @@ export default function Dashboard() {
                           {/* SELL Grid */}
                           <div className="flex flex-col gap-1.5">
                             <button
-                              onClick={() => handleEntryTrade('sell', 'market', parseFloat(limitSlPips), parseFloat(limitTpPips), 0, limitSizingMode === 'risk' ? parseFloat(limitRiskPerc) : 0, limitSizingMode === 'lots' ? parseFloat(limitLots) : 0)}
-                              className="py-1.5 rounded bg-rose-950/20 border border-rose-900/40 hover:bg-rose-900/35 text-rose-450 transition-all"
+                              onClick={() => handleEntryTrade('sell', 'market', safeParseFloat(limitSlPips), safeParseFloat(limitTpPips), 0, limitSizingMode === 'risk' ? safeParseFloat(limitRiskPerc) : 0, limitSizingMode === 'lots' ? safeParseFloat(limitLots) : 0)}
+                              className={`py-2 rounded text-[11px] font-bold uppercase transition-all border ${
+                                theme === 'dark'
+                                  ? 'bg-rose-950/40 border-rose-800/80 hover:bg-rose-900/50 text-rose-300'
+                                  : 'bg-rose-50 border-rose-200 hover:bg-rose-100 text-rose-800'
+                              }`}
                             >
                               MKT
                             </button>
                             <button
-                              onClick={() => handleEntryTrade('sell', 'limit_bid', parseFloat(limitSlPips), parseFloat(limitTpPips), 0, limitSizingMode === 'risk' ? parseFloat(limitRiskPerc) : 0, limitSizingMode === 'lots' ? parseFloat(limitLots) : 0)}
-                              className="py-1.5 rounded bg-neutral-900 border border-neutral-800 hover:border-neutral-700 text-neutral-300 transition-all"
+                              onClick={() => handleEntryTrade('sell', 'limit_bid', safeParseFloat(limitSlPips), safeParseFloat(limitTpPips), 0, limitSizingMode === 'risk' ? safeParseFloat(limitRiskPerc) : 0, limitSizingMode === 'lots' ? safeParseFloat(limitLots) : 0)}
+                              className={`py-2 rounded text-[11px] font-bold uppercase transition-all border ${
+                                theme === 'dark'
+                                  ? 'bg-neutral-900 border-neutral-800 hover:bg-neutral-800 text-neutral-200'
+                                  : 'bg-neutral-100 border-neutral-200 hover:bg-neutral-200 text-neutral-800'
+                              }`}
                             >
                               Limit Bid
                             </button>
                             <button
-                              onClick={() => handleEntryTrade('sell', 'mid', parseFloat(limitSlPips), parseFloat(limitTpPips), 0, limitSizingMode === 'risk' ? parseFloat(limitRiskPerc) : 0, limitSizingMode === 'lots' ? parseFloat(limitLots) : 0)}
-                              className="py-1.5 rounded bg-neutral-900 border border-neutral-800 hover:border-neutral-700 text-neutral-300 transition-all"
+                              onClick={() => handleEntryTrade('sell', 'mid', safeParseFloat(limitSlPips), safeParseFloat(limitTpPips), 0, limitSizingMode === 'risk' ? safeParseFloat(limitRiskPerc) : 0, limitSizingMode === 'lots' ? safeParseFloat(limitLots) : 0)}
+                              className={`py-2 rounded text-[11px] font-bold uppercase transition-all border ${
+                                theme === 'dark'
+                                  ? 'bg-neutral-900 border-neutral-800 hover:bg-neutral-800 text-neutral-200'
+                                  : 'bg-neutral-100 border-neutral-200 hover:bg-neutral-200 text-neutral-800'
+                              }`}
                             >
                               MID
                             </button>
                             <button
-                              onClick={() => handleEntryTrade('sell', 'join_ask', parseFloat(limitSlPips), parseFloat(limitTpPips), 0, limitSizingMode === 'risk' ? parseFloat(limitRiskPerc) : 0, limitSizingMode === 'lots' ? parseFloat(limitLots) : 0)}
-                              className="py-1.5 rounded bg-neutral-900 border border-neutral-800 hover:border-neutral-700 text-neutral-350 transition-all"
+                              onClick={() => handleEntryTrade('sell', 'join_ask', safeParseFloat(limitSlPips), safeParseFloat(limitTpPips), 0, limitSizingMode === 'risk' ? safeParseFloat(limitRiskPerc) : 0, limitSizingMode === 'lots' ? safeParseFloat(limitLots) : 0)}
+                              className={`py-2 rounded text-[11px] font-bold uppercase transition-all border ${
+                                theme === 'dark'
+                                  ? 'bg-neutral-900 border-neutral-800 hover:bg-neutral-800 text-neutral-200'
+                                  : 'bg-neutral-100 border-neutral-200 hover:bg-neutral-200 text-neutral-800'
+                              }`}
                             >
                               Join Ask
                             </button>
                             <button
-                              onClick={() => handleEntryTrade('sell', 'offset_sell', parseFloat(limitSlPips), parseFloat(limitTpPips), parseFloat(entryOffsetSell), limitSizingMode === 'risk' ? parseFloat(limitRiskPerc) : 0, limitSizingMode === 'lots' ? parseFloat(limitLots) : 0)}
-                              className="py-1.5 rounded bg-amber-950/20 border border-amber-900/40 hover:bg-amber-900/30 text-amber-400 transition-all"
+                              onClick={() => handleEntryTrade('sell', 'offset_sell', safeParseFloat(limitSlPips), safeParseFloat(limitTpPips), safeParseFloat(entryOffsetSell), limitSizingMode === 'risk' ? safeParseFloat(limitRiskPerc) : 0, limitSizingMode === 'lots' ? safeParseFloat(limitLots) : 0)}
+                              className={`py-2 rounded text-[11px] font-bold uppercase transition-all border ${
+                                theme === 'dark'
+                                  ? 'bg-amber-950/40 border-amber-800/80 hover:bg-amber-900/50 text-amber-300'
+                                  : 'bg-amber-50 border-amber-200 hover:bg-amber-100 text-amber-800'
+                              }`}
                             >
                               Offset (-{entryOffsetSell})
                             </button>

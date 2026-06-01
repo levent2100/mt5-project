@@ -77,14 +77,11 @@ class TradeCopier:
         tp_pips = float(payload.get("tp_pips", 0.0))
         offset_pips = float(payload.get("offset_pips", 0.0))
 
-        # Enforce C++ safeguard: Stop Loss cannot be smaller than DefaultSLPips
+        # Enforce default Stop Loss only if no stop loss was explicitly specified (sl_pips == 0)
         settings.load()
         default_sl_dict = settings.default_sl_pips
         min_sl = float(default_sl_dict.get(symbol_global, 0.0))
-        if sl_pips > 0 and sl_pips < min_sl:
-            logger.info(f"Stop loss of {sl_pips} pips was below default floor of {min_sl} for {symbol_global}. Scaling up to default.")
-            sl_pips = min_sl
-        elif sl_pips == 0:
+        if sl_pips <= 0:
             sl_pips = min_sl
 
         # Default TP to 2.0 * SL if not specified
@@ -122,9 +119,19 @@ class TradeCopier:
             scaled_offset = offset_pips * point_value
 
             # 3. Determine scaled lot size or risk
-            # Override if payload explicitly sets a custom risk percentage
-            is_risk_based = acc.get("IsRiskBased", False) or (float(payload.get("risk", 0.0)) > 0)
-            risk_perc = float(payload.get("risk", acc.get("RiskPerc", 0.0)))
+            # Override if payload explicitly sets a custom risk percentage, or default to acc.RiskPerc if no explicit qty
+            is_risk_based = False
+            custom_risk = float(payload.get("risk", 0.0))
+            if custom_risk > 0:
+                is_risk_based = True
+                risk_perc = custom_risk
+            elif acc.get("RiskPerc", 0.0) > 0 and qty_ui <= 0:
+                is_risk_based = True
+                risk_perc = float(acc.get("RiskPerc"))
+            else:
+                is_risk_based = False
+                risk_perc = 0.0
+
             multiplier = float(acc.get("Multiplier", 1.0))
 
             trade_payload = {

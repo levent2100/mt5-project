@@ -8,7 +8,7 @@ import threading
 import json
 import time
 import logging
-from datetime import datetime
+from datetime import datetime, time as dt_time
 from decimal import Decimal, ROUND_HALF_UP, ROUND_DOWN, getcontext
 
 # --- Third-Party Imports ---
@@ -40,6 +40,8 @@ SERVER_TIME_SYMBOLS = ["EURUSD", "GBPUSD", "USDJPY", "EURJPY", "GBPJPY"]
 # -- Trading Parameters --
 MAGIC_NUMBER = 234000  # Unique identifier for trades placed by this script
 DEFAULT_SLIPPAGE_DEVIATION = 20  # Default slippage in points for market orders
+ENABLE_TIME_STOP = True  # Enable/disable time-based stop monitor
+ENABLE_TIMES_STOP = True  # Alias for compatibility
 
 # -- Custom Maximum Lot Sizes (Broker Override) --
 MAX_LOT_SIZES = {
@@ -173,8 +175,12 @@ def normalize_explicit_volume(requested_qty_str, symbol_info_obj):
         if min_v <= 0 and requested_qty <= 0: return 0.0, None
         
         current_volume = requested_qty
-        if current_volume < min_v: current_volume = min_v
-        if current_volume > max_v: current_volume = max_v
+        if current_volume < min_v:
+            logging.warning(f"Requested volume {current_volume} is below platform minimum of {min_v}. Adjusting to minimum.")
+            current_volume = min_v
+        elif current_volume > max_v:
+            logging.warning(f"Requested volume {current_volume} is above platform maximum of {max_v}. Adjusting to maximum.")
+            current_volume = max_v
         
         if step_v > 0:
             num_steps = (current_volume / step_v).quantize(Decimal('1'), rounding=ROUND_HALF_UP)
@@ -272,22 +278,142 @@ def get_latest_server_time():
     return latest_time or int(time.time())
 
 def calculate_atr(symbol, period=14):
-    """ Calculates the Average True Range (ATR) over 14 completed daily bars using TA-Lib. """
-    # Fetch completed daily bars plus buffer for TA-Lib ATR calculation
-    rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_D1, 1, 100)
-    if rates is None or len(rates) < period + 1:
-        rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_D1, 0, 100)
-        if rates is None or len(rates) < period + 1:
-            return None
-            
+    """
+    Calculates advanced ATR on 1-minute chart:
+    - Long_ATR (7200 bars on M1)
+    - Mid_ATR (14 bars on M1)
+    - Short_ATR (5 bars on M1)
+    - Spread10x (10 * current spread)
+    Returns the maximum of these 4 values.
+    """
+    rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M1, 0, 7500)
+    if rates is None or len(rates) < 15:
+        logging.error(f"Failed to copy rates for {symbol} on M1. rates count: {len(rates) if rates is not None else 0}")
+        return None
+
     high = np.array([float(bar['high']) for bar in rates], dtype=np.float64)
     low = np.array([float(bar['low']) for bar in rates], dtype=np.float64)
     close = np.array([float(bar['close']) for bar in rates], dtype=np.float64)
+
+    # Short_ATR (5 bars)
+    short_atr_vals = talib.ATR(high, low, close, timeperiod=5)
+    short_atr = float(short_atr_vals[-1]) if short_atr_vals is not None and len(short_atr_vals) > 0 and not np.isnan(short_atr_vals[-1]) else 0.0
+
+    # Mid_ATR (14 bars)
+    mid_atr_vals = talib.ATR(high, low, close, timeperiod=14)
+    mid_atr = float(mid_atr_vals[-1]) if mid_atr_vals is not None and len(mid_atr_vals) > 0 and not np.isnan(mid_atr_vals[-1]) else 0.0
+
+    # Long_ATR (7200 bars)
+    long_period = 7200
+    if len(rates) < long_period + 1:
+        long_period = len(rates) - 1
     
-    atr_values = talib.ATR(high, low, close, timeperiod=period)
-    if atr_values is None or len(atr_values) == 0 or np.isnan(atr_values[-1]):
-        return None
-    return float(atr_values[-1])
+    if long_period >= 5:
+        long_atr_vals = talib.ATR(high, low, close, timeperiod=long_period)
+        long_atr = float(long_atr_vals[-1]) if long_atr_vals is not None and len(long_atr_vals) > 0 and not np.isnan(long_atr_vals[-1]) else 0.0
+    else:
+        long_atr = 0.0
+
+    # Spread10x
+    tick = mt5.symbol_info_tick(symbol)
+    if tick and tick.ask > 0 and tick.bid > 0:
+        spread = tick.ask - tick.bid
+        spread10x = 10.0 * spread
+    else:
+        spread10x = 0.0
+
+    real_atr = max(long_atr, mid_atr, short_atr, spread10x)
+    return real_atr
+
+def get_account_settings(login_num):
+    """
+    Loads propfundsettings.json and retrieves the settings dictionary
+    for the specified MT5 login number (compared as a string).
+    """
+    import os
+    paths = [
+        "/root/scripts/propfundsettings.json",
+        "/pjt_src/mt5-project/scripts/propfundsettings.json",
+        "scripts/propfundsettings.json",
+        "../scripts/propfundsettings.json"
+    ]
+    for path in paths:
+        if os.path.exists(path):
+            try:
+                with open(path, 'r') as f:
+                    data = json.load(f)
+                
+                # Check MT5Accounts
+                mt5_data = data.get("MT5Accounts", {})
+                accounts = mt5_data.get("Accounts", [])
+                for acc in accounts:
+                    if str(acc.get("name")) == str(login_num):
+                        return acc
+                
+                # Also check FutureAccounts just in case
+                futures_data = data.get("FutureAccounts", {})
+                f_accounts = futures_data.get("Accounts", [])
+                for acc in f_accounts:
+                    if str(acc.get("name")) == str(login_num):
+                        return acc
+            except Exception as e:
+                logging.error(f"Error loading or parsing {path}: {e}")
+    return {}
+
+def time_stop_monitor():
+    """
+    Background thread that periodically checks all open positions.
+    If a position has been open for at least TimeStop seconds and its profit is negative,
+    it is closed immediately.
+    """
+    logging.info("Time-based stop monitor thread started.")
+    while True:
+        try:
+            time.sleep(1.0)  # Check every second
+            
+            # Check global enablement flags
+            if not ENABLE_TIME_STOP or not ENABLE_TIMES_STOP:
+                continue
+                
+            if not mt5_manager.ensure_connection():
+                continue
+                
+            with mt5_manager.lock:
+                # Load TimeStop value from propfundsettings.json
+                time_stop = 180  # Default fallback
+                import os
+                paths = [
+                    "/root/scripts/propfundsettings.json",
+                    "/pjt_src/mt5-project/scripts/propfundsettings.json",
+                    "scripts/propfundsettings.json",
+                    "../scripts/propfundsettings.json"
+                ]
+                for path in paths:
+                    if os.path.exists(path):
+                        try:
+                            with open(path, 'r') as f:
+                                data = json.load(f)
+                            time_stop = data.get("TimeStop", 180)
+                            break
+                        except Exception:
+                            pass
+                
+                # Get all open positions
+                positions = mt5.positions_get()
+                if positions:
+                    for pos in positions:
+                        current_time = get_latest_server_time()
+                        elapsed = current_time - pos.time
+                        
+                        if elapsed >= time_stop:
+                            if pos.profit < 0.0:
+                                logging.warning(
+                                    f"[TIME STOP] Position {pos.ticket} for {pos.symbol} has been open for "
+                                    f"{elapsed}s (>= {time_stop}s) and PNL is negative ({pos.profit}). Closing position."
+                                )
+                                close_mt5_position(pos.ticket, pos)
+        except Exception as e:
+            logging.error(f"Error in time_stop_monitor: {e}")
 
 
 # ==============================================================================
@@ -353,6 +479,10 @@ class RequestHandler(BaseHTTPRequestHandler):
             account_info = mt5.account_info()
             if not account_info: return self._send_error_response(f"Failed to get account info. Error: {mt5.last_error()}", 500)
             
+            # Load active account settings from propfundsettings.json
+            account_settings = get_account_settings(account_info.login)
+            risk_perc = float(account_settings.get("RiskPerc", 0.0))
+            
             results, overall_success = [], True
             for trade in data['trades']:
                 result = {"instrument": trade.get("instrument"), "success": False, "error": None, "calculatedVolume": None}
@@ -365,12 +495,54 @@ class RequestHandler(BaseHTTPRequestHandler):
                 tick = mt5.symbol_info_tick(instrument)
                 if not tick or tick.ask == 0 or tick.bid == 0: result["error"] = f"No valid tick for {instrument}."; results.append(result); overall_success = False; continue
                 
-                try: qty_val, risk_val = float(trade.get("qty") or 0.0), float(trade.get("risk") or 0.0)
-                except (ValueError, TypeError): result["error"] = "Invalid qty or risk format."; results.append(result); overall_success = False; continue
+                try:
+                    qty_val = float(trade.get("qty") or 0.0)
+                    risk_val = float(trade.get("risk") or 0.0)
+                except (ValueError, TypeError):
+                    result["error"] = "Invalid qty or risk format."
+                    results.append(result)
+                    overall_success = False
+                    continue
                 
-                if (qty_val > 0) == (risk_val > 0): result["error"] = "Provide either 'qty' or 'risk', not both/neither."; results.append(result); overall_success = False; continue
+                # Sizing method selection
+                is_risk = False
+                final_risk_perc = 0.0
                 
-                vol, err = calculate_risk_based_volume(str(risk_val), str(trade.get("sl_pips")), account_info, symbol_info) if risk_val > 0 else normalize_explicit_volume(str(qty_val), symbol_info)
+                if qty_val > 0:
+                    is_risk = False
+                elif risk_val > 0:
+                    is_risk = True
+                    final_risk_perc = risk_val
+                elif risk_perc > 0:
+                    is_risk = True
+                    final_risk_perc = risk_perc
+                else:
+                    result["error"] = "No sizing method specified (qty or risk must be positive)."
+                    results.append(result)
+                    overall_success = False
+                    continue
+                
+                # Read sl_pips explicitly passed in the trade request
+                sl_pips = float(trade.get("sl_pips") or 0.0)
+                
+                if is_risk:
+                    if sl_pips <= 0:
+                        # Fallback to ATR-based default SL if not specified
+                        real_atr = calculate_atr(instrument)
+                        if real_atr is not None and real_atr > 0:
+                            sl_pips = 2.0 * real_atr
+                        else:
+                            sl_pips = 0.0020  # Safe generic fallback
+                    vol, err = calculate_risk_based_volume(str(final_risk_perc), str(sl_pips), account_info, symbol_info)
+                else:
+                    if sl_pips <= 0:
+                        real_atr = calculate_atr(instrument)
+                        if real_atr is not None and real_atr > 0:
+                            sl_pips = 2.0 * real_atr
+                        else:
+                            sl_pips = 0.0020  # Safe generic fallback
+                    vol, err = normalize_explicit_volume(str(qty_val), symbol_info)
+                
                 if err: result["error"] = err; results.append(result); overall_success = False; continue
                 
                 result["calculatedVolume"] = vol
@@ -383,14 +555,14 @@ class RequestHandler(BaseHTTPRequestHandler):
                     if o_type in ["market", "limit_ask"]: price, order_type = ask, mt5.ORDER_TYPE_BUY
                     elif o_type == "mid": price, order_type = mid, mt5.ORDER_TYPE_BUY_LIMIT
                     elif o_type == "join_bid": price, order_type = bid, mt5.ORDER_TYPE_BUY_LIMIT
-                    elif o_type == "offset": price, order_type = bid - offset_val, mt5.ORDER_TYPE_BUY_LIMIT
+                    elif o_type in ["offset", "offset_buy"]: price, order_type = bid - offset_val, mt5.ORDER_TYPE_BUY_LIMIT
                 else: # Sell
                     if o_type in ["market", "limit_bid"]: price, order_type = bid, mt5.ORDER_TYPE_SELL
                     elif o_type == "join_ask": price, order_type = ask, mt5.ORDER_TYPE_SELL_LIMIT
                     elif o_type == "mid": price, order_type = mid, mt5.ORDER_TYPE_SELL_LIMIT
-                    elif o_type == "offset": price, order_type = ask + offset_val, mt5.ORDER_TYPE_SELL_LIMIT
+                    elif o_type in ["offset", "offset_sell"]: price, order_type = ask + offset_val, mt5.ORDER_TYPE_SELL_LIMIT
                 
-                sl_pips, tp_pips = float(trade.get("sl_pips") or 0.0), float(trade.get("tp_pips") or 0.0)
+                tp_pips = float(trade.get("tp_pips") or 0.0)
                 sl = price - sl_pips if is_buy else price + sl_pips
                 tp = price + tp_pips if is_buy else price - tp_pips
                 is_market = order_type in [mt5.ORDER_TYPE_BUY, mt5.ORDER_TYPE_SELL]
@@ -686,6 +858,11 @@ def run_server():
         if not mt5_manager.connect():
             logging.critical("Halting: Could not establish initial MT5 connection.")
             return
+        
+        # Start background time-stop monitor thread
+        monitor_thread = threading.Thread(target=time_stop_monitor, name="TimeStopMonitor", daemon=True)
+        monitor_thread.start()
+        
         server_address = (HOST, PORT)
         server = ThreadingHTTPServer(server_address, RequestHandler)
         logging.info(f"HTTP Server starting on http://{HOST}:{PORT}")

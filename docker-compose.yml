@@ -25,6 +25,8 @@ services:
     volumes:
       # Mount host scripts folder to feed config settings dynamically
       - ./scripts:/app/scripts
+      # Mount host backend folder for real-time code updates
+      - ./backend:/app/backend
     restart: always
 
   trading-frontend:
