@@ -102,10 +102,29 @@ else:
 fi
 
 # Instance 2
-# if [ -f "/config/.wine/drive_c/Program Files/MetaTrader 5_2/terminal64.exe" ]; then
-#     wine "/config/.wine/drive_c/Program Files/MetaTrader 5_2/terminal64.exe" /portable &
-#     sleep 3
-# fi
+if [ -f "/config/.wine/drive_c/Program Files/MetaTrader 5_2/terminal64.exe" ]; then
+    echo "Configuring terminal.ini options to enable Algo Trading for Instance 2..."
+    python3 -c "
+path = '/config/.wine/drive_c/Program Files/MetaTrader 5_2/Config/terminal.ini'
+import os
+if os.path.exists(path):
+    with open(path, 'r', encoding='utf-16') as f:
+        content = f.read()
+    target = '[Options]'
+    replacement = '[Options]\r\nExpertEnable=1\r\nExpertInputs=1\r\nExpertImport=1\r\nExpertConfirm=0\r\n'
+    if target in content:
+        content = content.replace(target, replacement)
+    else:
+        content += '\r\n' + replacement
+    with open(path, 'w', encoding='utf-16') as f:
+        f.write(content)
+    print('Updated terminal.ini successfully!')
+else:
+    print('terminal.ini not found, skipping configuration.')
+"
+    wine "/config/.wine/drive_c/Program Files/MetaTrader 5_2/terminal64.exe" /portable &
+    sleep 3
+fi
 
 # Instance 3
 # if [ -f "/config/.wine/drive_c/Program Files/MetaTrader 5_3/terminal64.exe" ]; then
@@ -168,10 +187,10 @@ if [ -f "/root/scripts/mt5_http_bridge1.py" ]; then
 fi
 
 # Bridge 2 - Port 58810
-# if [ -f "/root/scripts/mt5_http_bridge2.py" ]; then
-#     wine /config/.wine/drive_c/Python310/python.exe /root/scripts/mt5_http_bridge2.py &
-#     sleep 1
-# fi
+if [ -f "/root/scripts/mt5_http_bridge2.py" ]; then
+    wine /config/.wine/drive_c/Python310/python.exe /root/scripts/mt5_http_bridge2.py &
+    sleep 1
+fi
 
 # Bridge 3 - Port 58811
 # if [ -f "/root/scripts/mt5_http_bridge3.py" ]; then
