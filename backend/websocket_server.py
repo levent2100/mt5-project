@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import json
+import time
 from datetime import datetime
 from typing import Dict, Any, List, Set, Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -98,11 +99,36 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+# Thread-safe in-memory cache to preserve the last known good account data across transient timeouts/errors and prevent UI flickering
+# Format: {account_name: {"timestamp": float, "data": dict}}
+_last_known_good_accounts = {}
+
 # --- Helper: Convert bridge response to UI standardized Account object ---
 def map_bridge_to_ui_account(acc_config: Dict[str, Any], bridge_data: Optional[Dict[str, Any]] = None, status: str = "Connected", error_msg: Optional[str] = None) -> Dict[str, Any]:
     acc_name = acc_config.get("name", "Unknown")
     company = acc_config.get("Company", "MT5")
     name_conversions = acc_config.get("NameConversions", {})
+
+    global _last_known_good_accounts
+    now = time.time()
+
+    if bridge_data is None:
+        if acc_name in _last_known_good_accounts:
+            cached = _last_known_good_accounts[acc_name]
+            last_success_time = cached.get("timestamp", 0.0)
+            # Carry over only if last successful update was within the last 10 seconds
+            if now - last_success_time <= 10.0:
+                bridge_data = cached.get("data")
+                logger.info(f"[LKG CACHE] Carrying over last known good positions/stats for {acc_name} (last success was {now - last_success_time:.1f}s ago)")
+            else:
+                logger.warning(f"[LKG CACHE] Cache for {acc_name} has expired (no successful update for {now - last_success_time:.1f}s). Clearing cache to prevent stale data.")
+                _last_known_good_accounts.pop(acc_name, None)
+    else:
+        # Cache successful account status response
+        _last_known_good_accounts[acc_name] = {
+            "timestamp": now,
+            "data": bridge_data
+        }
 
     # Default skeleton
     ui_acc = {
