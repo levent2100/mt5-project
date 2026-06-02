@@ -294,7 +294,7 @@
             },
             {
                 "trade_enabled": true,
-                "Company": "5_Exness_Raw_Demo_10k",
+                "Company": "5_Exness_Zero_Demo_10k",
                 "AccType": "AccType dontcare",
                 "EvalCost": 0.0,
                 "ActivationCost": 0.0,
