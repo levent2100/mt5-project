@@ -76,6 +76,9 @@ sleep 2
 # =====================================================================
 echo "5. Starting MT5 instances..."
 
+# Optimize Wine's X11 clipboard integration
+wine reg add "HKCU\Software\Wine\X11 Driver" /v UsePrimarySelection /t REG_SZ /d "y" /f
+
 # Instance 1 (Active by default)
 if [ -f "/config/.wine/drive_c/Program Files/MetaTrader 5_1/terminal64.exe" ]; then
     echo "Configuring terminal.ini options to enable Algo Trading..."
