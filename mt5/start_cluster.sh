@@ -60,9 +60,9 @@ echo "3. Starting VNC Server..."
 if [ -n "$VNC_PASSWD" ]; then
     mkdir -p ~/.vnc
     x11vnc -storepasswd "$VNC_PASSWD" ~/.vnc/passwd
-    x11vnc -display :1 -rfbauth ~/.vnc/passwd -forever -shared -bg &
+    x11vnc -display :1 -rfbauth ~/.vnc/passwd -forever -shared -noclipboard &
 else
-    x11vnc -display :1 -nopw -forever -shared -bg &
+    x11vnc -display :1 -nopw -forever -shared -noclipboard &
 fi
 sleep 1
 
