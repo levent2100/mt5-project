@@ -46,8 +46,8 @@ class TradeCopier:
         
         name_conversions = ref_acc.get("NameConversions", {})
         symbol_broker = name_conversions.get(symbol_global, symbol_global)
-        if symbol_broker == "N/A":
-            return {"success": False, "error": f"Symbol {symbol_global} is N/A on reference account."}
+        if symbol_broker == "N/A" or not symbol_broker:
+            return {"success": False, "error": f"Symbol {symbol_global} is N/A or empty on reference account."}
             
         client = BridgeClient(ip_port)
         res = await client._post("getatr", {"instrument": symbol_broker})
@@ -118,8 +118,8 @@ class TradeCopier:
             name_conversions = acc.get("NameConversions", {})
             symbol_broker = name_conversions.get(symbol_global, symbol_global)
             
-            if symbol_broker == "N/A":
-                logger.info(f"Skipping trade for account {acc_name}: Symbol conversion is N/A.")
+            if symbol_broker == "N/A" or not symbol_broker:
+                logger.info(f"Skipping trade for account {acc_name}: Symbol conversion is N/A or empty.")
                 continue
 
             # 2. Scale pip parameters by DefaultPointValue
@@ -228,7 +228,7 @@ class TradeCopier:
 
             name_conversions = acc.get("NameConversions", {})
             symbol_broker = name_conversions.get(symbol_global, symbol_global)
-            if symbol_broker == "N/A":
+            if symbol_broker == "N/A" or not symbol_broker:
                 continue
 
             # Scale offset_pips by account's DefaultPointValue
@@ -283,7 +283,7 @@ class TradeCopier:
 
             name_conversions = acc.get("NameConversions", {})
             symbol_broker = name_conversions.get(symbol_global, symbol_global)
-            if symbol_broker == "N/A":
+            if symbol_broker == "N/A" or not symbol_broker:
                 continue
 
             # Scale sl/tp values by account's DefaultPointValue if they are pip-based
@@ -350,8 +350,8 @@ class TradeCopier:
             if symbol_global:
                 name_conversions = acc.get("NameConversions", {})
                 symbol_broker = name_conversions.get(symbol_global, symbol_global)
-                if symbol_broker == "N/A":
-                    logger.info(f"Skipping flatten on account {acc_name} for symbol {symbol_global} (conversion is N/A)")
+                if symbol_broker == "N/A" or not symbol_broker:
+                    logger.info(f"Skipping flatten on account {acc_name} for symbol {symbol_global} (conversion is N/A or empty)")
                     continue
 
             client = BridgeClient(ip_port)
@@ -381,38 +381,54 @@ class TradeCopier:
         }
 
     async def copy_cancel_pending(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Cancel all pending orders across all active accounts."""
+        """Cancel pending orders across all active accounts."""
         symbol_global = payload.get("instrument")
 
         active_accounts = self.get_active_accounts()
         if not active_accounts:
             return {"success": False, "message": "No active trading accounts configured."}
 
-        tasks = []
-        account_names = []
-
-        for acc in active_accounts:
-            acc_name = acc.get("name", "Unknown")
-            ip_port = acc.get("ip_port")
-            if not ip_port:
-                continue
-
-            symbol_broker = None
-            if symbol_global:
-                name_conversions = acc.get("NameConversions", {})
-                symbol_broker = name_conversions.get(symbol_global, symbol_global)
-                if symbol_broker == "N/A":
+        # If a specific symbol is requested, we only cancel that symbol's orders
+        if symbol_global:
+            tasks = []
+            account_names = []
+            for acc in active_accounts:
+                acc_name = acc.get("name", "Unknown")
+                ip_port = acc.get("ip_port")
+                if not ip_port:
                     continue
 
-            client = BridgeClient(ip_port)
-            if symbol_broker:
-                tasks.append(client.cancel_order(symbol_broker))
-            else:
-                pass
-            account_names.append(acc_name)
+                name_conversions = acc.get("NameConversions", {})
+                symbol_broker = name_conversions.get(symbol_global, symbol_global)
+                if symbol_broker == "N/A" or not symbol_broker:
+                    logger.info(f"Skipping cancel pending on account {acc_name} for symbol {symbol_global} (conversion is N/A or empty)")
+                    continue
 
-        # For the sake of function parity, let's fetch active orders from each account,
-        # and then send cancel_order for each symbol.
+                client = BridgeClient(ip_port)
+                tasks.append(client.cancel_order(symbol_broker))
+                account_names.append(acc_name)
+
+            if not tasks:
+                return {"success": True, "message": f"No active accounts had a valid conversion for {symbol_global} to cancel."}
+
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            summary_results = []
+            for name, res in zip(account_names, results):
+                if isinstance(res, Exception):
+                    summary_results.append({"account": name, "success": False, "error": str(res)})
+                else:
+                    summary_results.append({
+                        "account": name,
+                        "success": res.get("success", False),
+                        "message": res.get("message", res.get("error", ""))
+                    })
+            return {
+                "success": all(r["success"] for r in summary_results),
+                "message": f"Pending orders for {symbol_global} cancellation request processed.",
+                "details": summary_results
+            }
+
+        # Otherwise, cancel ALL pending orders on all active accounts
         async def cancel_for_account(acc_dict: Dict[str, Any]) -> Dict[str, Any]:
             ip_port = acc_dict.get("ip_port")
             client = BridgeClient(ip_port)

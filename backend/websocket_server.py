@@ -150,6 +150,15 @@ def map_bridge_to_ui_account(acc_config: Dict[str, Any], bridge_data: Optional[D
     }
 
     if bridge_data:
+        actual_login = str(bridge_data.get("account", ""))
+        if actual_login and actual_login != str(acc_name):
+            status = "Error"
+            error_msg = f"Account number mismatch (Terminal: {actual_login}, Config: {acc_name})"
+            ui_acc["status"] = status
+            ui_acc["error"] = error_msg
+            bridge_data = None
+
+    if bridge_data:
         ui_acc["cash_value"] = float(bridge_data.get("cash_value", 0.0))
         ui_acc["buying_power"] = float(bridge_data.get("buying_power", 0.0))
         ui_acc["unrealizedPNL"] = float(bridge_data.get("total_unrealized", 0.0))
@@ -335,8 +344,10 @@ async def poll_spreads():
                             mapped_spreads = {}
                             for sym in symbols:
                                 b_sym = name_conv.get(sym, sym)
-                                if b_sym in raw_spreads:
+                                if b_sym and b_sym != "N/A" and b_sym in raw_spreads:
                                     mapped_spreads[sym] = raw_spreads[b_sym]
+                                else:
+                                    mapped_spreads[sym] = -1.0
 
                             spreads_data.append({
                                 "id": acc.get("name"),

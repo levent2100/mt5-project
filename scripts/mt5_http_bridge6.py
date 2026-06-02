@@ -331,9 +331,18 @@ def close_mt5_position(position_ticket, position_obj):
 
 def get_latest_server_time():
     """ Gets the most recent server time by polling ticks from major symbols. """
-    latest_time = 0;
+    latest_time = 0
+    account_info = mt5.account_info()
+    name_conversions = {}
+    if account_info:
+        settings = get_account_settings(account_info.login)
+        name_conversions = settings.get("NameConversions", {})
+    
     for symbol in SERVER_TIME_SYMBOLS:
-        tick = mt5.symbol_info_tick(symbol)
+        mapped_symbol = name_conversions.get(symbol, symbol)
+        if not mapped_symbol:
+            continue
+        tick = mt5.symbol_info_tick(mapped_symbol)
         if tick and tick.time > latest_time: latest_time = tick.time
     return latest_time or int(time.time())
 
@@ -462,6 +471,43 @@ def get_account_settings(login_num):
                 logging.error(f"Error loading or parsing {path}: {e}")
     return {}
 
+def get_expected_login_by_port(port):
+    """
+    Loads propfundsettings.json and retrieves the configured account name
+    for the specified bridge port.
+    """
+    import os
+    paths = [
+        "/root/scripts/propfundsettings.json",
+        "/pjt_src/mt5-project/scripts/propfundsettings.json",
+        "scripts/propfundsettings.json",
+        "../scripts/propfundsettings.json"
+    ]
+    for path in paths:
+        if os.path.exists(path):
+            try:
+                with open(path, 'r') as f:
+                    data = json.load(f)
+                
+                # Check MT5Accounts
+                mt5_data = data.get("MT5Accounts", {})
+                accounts = mt5_data.get("Accounts", [])
+                for acc in accounts:
+                    ip_port = acc.get("ip_port", "")
+                    if f":{port}" in ip_port:
+                        return str(acc.get("name"))
+                
+                # Also check FutureAccounts just in case
+                futures_data = data.get("FutureAccounts", {})
+                f_accounts = futures_data.get("Accounts", [])
+                for acc in f_accounts:
+                    ip_port = acc.get("ip_port", "")
+                    if f":{port}" in ip_port:
+                        return str(acc.get("name"))
+            except Exception as e:
+                logging.error(f"Error loading or parsing {path}: {e}")
+    return None
+
 def time_stop_monitor():
     """
     Background thread that periodically checks all open positions.
@@ -564,7 +610,21 @@ class RequestHandler(BaseHTTPRequestHandler):
             }
             handler = handlers.get(command)
 
-            if handler: handler(data)
+            if handler:
+                if command in ["trade", "cancelandflatten", "movestoploss", "modify_order", "cancel_order", "manage_position_stops"]:
+                    expected_login = get_expected_login_by_port(PORT)
+                    if expected_login:
+                        if not mt5_manager.ensure_connection():
+                            return self._send_error_response("Failed to connect to MetaTrader 5.", 503)
+                        acc_info = mt5.account_info()
+                        if not acc_info:
+                            return self._send_error_response("Failed to retrieve MT5 account info.", 500)
+                        actual_login = str(acc_info.login)
+                        if actual_login != expected_login:
+                            err_msg = f"Strict account check failed: MT5 terminal is logged into '{actual_login}', but settings configure '{expected_login}' for port {PORT}. Request rejected for safety."
+                            logging.critical(err_msg)
+                            return self._send_error_response(err_msg, 400)
+                handler(data)
             else: self._send_error_response(f"Unknown request type: {command}", 404)
         except json.JSONDecodeError: self._send_error_response("Invalid JSON format in request body.", 400)
         except Exception as e: logging.exception("Unhandled exception during POST request:"); self._send_error_response(f"Internal server error: {e}", 500)
