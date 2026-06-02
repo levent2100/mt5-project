@@ -647,7 +647,7 @@
                     "DAX40": "GER40.cash",
                     "FTSE100": "UK100.cash",
                     "NQ100": "US100.cash",
-                    "GOLD": "XAUUSD+",
+                    "GOLD": "XAUUSD",
                     "BTC": "BTCUSD"
                 },
                 "DefaultPointValue": {
