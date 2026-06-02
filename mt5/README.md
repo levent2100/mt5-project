@@ -182,5 +182,67 @@ Running multiple graphical applications inside a single container can be memory 
 2. **Minimize Charts:** Go to *Tools -> Options -> Charts* and change **Max bars in chart** to `5000`. Keep terminal windows minimized inside the VNC workspace when not manually inspecting them to bypass the Wine X11 drawing loop entirely.
 
 
+## Phase 7: State Persistence & Backup Guide
+
+By default, the Wine prefix and all your installed MetaTrader terminals are stored inside the container's `/config` directory. If you run `docker compose down` or rebuild the image, this internal container storage will be deleted, and you will lose all 11 terminal installations and login credentials.
+
+To prevent this and easily back up your configuration, use one of the following methods:
+
+### Method 1: Manual Backup using `docker cp` (No configuration changes required)
+You can copy the entire `/config` folder directly from the running container to your host machine at any time.
+
+* **To Backup:**
+  Run this command on your host:
+  ```bash
+  docker cp mt5-project-mt5-container-1:/config ./mt5_config_backup
+  ```
+* **To Restore:**
+  If you recreate the container, run this to copy the backup back in:
+  ```bash
+  docker cp ./mt5_config_backup/. mt5-project-mt5-container-1:/config/
+  docker compose restart mt5-container
+  ```
+
+### Method 2: Mount a Host Folder (Recommended)
+You can update your `docker-compose.yml` to bind a folder on your host machine to `/config`, ensuring the virtual C: drive state is permanently stored on the host.
+
+1. Copy the current config directory out of your running container to your host:
+   ```bash
+   docker cp mt5-project-mt5-container-1:/config ./mt5_config_data
+   ```
+2. Update the `volumes` section of the `mt5-container` service in `docker-compose.yml`:
+   ```yaml
+       volumes:
+         - ./mt5_config_data:/config
+         - ./mt5/start_cluster.sh:/root/start_cluster.sh
+         - ./scripts:/root/scripts
+   ```
+3. Run `docker compose down && docker compose up -d` to restart the stack using the host directory.
+
+### Method 3: Use a Named Docker Volume
+You can let Docker manage persistence automatically via a named volume.
+
+1. Add the volume mapping in `docker-compose.yml`:
+   ```yaml
+   services:
+     mt5-container:
+       ...
+       volumes:
+         - mt5-volume:/config
+         ...
+   
+   volumes:
+     mt5-volume:
+   ```
+2. Docker will automatically copy the existing `/config` data to the volume on the first boot and keep it safe across all container recreations.
+
+
+---
+
+## Diagnostics & Troubleshooting
+
+To view live application logs or debug Wine initialization errors inside the container, you can run:
+```bash
 docker compose exec mt5-container cat /var/log/mt5_cluster.err
 docker compose exec mt5-container cat /var/log/mt5_cluster.log
+```
