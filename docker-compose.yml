@@ -12,7 +12,7 @@ services:
       # Mount your host scripts folder inside the container
       - ./scripts:/root/scripts
     ports:
-      - "127.0.0.1:58801-58810:58801-58810" # Mapped ports for your 10 custom HTTP Python scripts
+      - "127.0.0.1:58801-58811:58801-58811" # Mapped ports for your 11 custom HTTP Python scripts
       - "127.0.0.1:8080:8080" # Secure noVNC Port
       - "127.0.0.1:5900:5900"
     #restart: always
