@@ -151,6 +151,7 @@ export default function Dashboard() {
   const [limitSizingMode, setLimitSizingMode] = useState<'risk' | 'lots'>('risk');
   const [limitRiskPerc, setLimitRiskPerc] = useState<string>('2.0');
   const [limitLots, setLimitLots] = useState<string>('1.0');
+  const [limitUseDefault, setLimitUseDefault] = useState<boolean>(true);
   
   // 4. Modify Order Mode
   const [modifyOffsetBuy, setModifyOffsetBuy] = useState<string>('5.0');
@@ -460,6 +461,15 @@ export default function Dashboard() {
     return referenceAccount.orders.find(ord => matchSymbol(ord.symbol, ord.displaySymbol, selectedSymbol));
   }, [referenceAccount, selectedSymbol]);
 
+  const computedDefaultSl = useMemo(() => {
+    if (!selectedSymbol) return 15.0;
+    return atrInfo ? Math.round(2.0 * atrInfo.atr_pips) : (defaultSlPips[selectedSymbol] || 15.0);
+  }, [selectedSymbol, atrInfo, defaultSlPips]);
+
+  const computedDefaultTp = useMemo(() => {
+    return computedDefaultSl * 2.0;
+  }, [computedDefaultSl]);
+
   // --- Auto-fill SL pips based on selected symbol ---
   useEffect(() => {
     if (selectedSymbol && defaultSlPips[selectedSymbol] !== undefined) {
@@ -483,7 +493,7 @@ export default function Dashboard() {
 
   // --- Dynamic ATR fetcher ---
   useEffect(() => {
-    if (selectedSymbol && entryMode === 'atr_risk') {
+    if (selectedSymbol && (entryMode === 'atr_risk' || (entryMode === 'pending' && limitUseDefault))) {
       setAtrLoading(true);
       sendRequest('get_atr', { symbol: selectedSymbol })
         .then(res => {
@@ -500,7 +510,7 @@ export default function Dashboard() {
         })
         .finally(() => setAtrLoading(false));
     }
-  }, [selectedSymbol, entryMode]);
+  }, [selectedSymbol, entryMode, limitUseDefault]);
 
   // --- Upgraded Interactive Cockpit Command Triggers ---
   const handleEntryTrade = (
@@ -513,22 +523,38 @@ export default function Dashboard() {
     lotsVal: number = 0
   ) => {
     if (!selectedSymbol) return triggerAlert('Select an instrument first!', 'warning');
-    if (isNaN(slVal) || slVal <= 0) return triggerAlert('Input a valid Stop Loss (pips)!', 'warning');
+
+    let finalSl = slVal;
+    let finalTp = tpVal;
+    let finalRisk = riskPerc;
+    let finalLots = lotsVal;
+
+    if (entryMode === 'pending' && limitUseDefault) {
+      finalSl = atrInfo ? Math.round(2.0 * atrInfo.atr_pips) : (defaultSlPips[selectedSymbol] || 15.0);
+      finalTp = finalSl * 2.0;
+      finalRisk = 0;
+      finalLots = 0;
+    }
+
+    if (isNaN(finalSl) || finalSl <= 0) return triggerAlert('Input a valid Stop Loss (pips)!', 'warning');
 
     const payload: any = {
       symbol: selectedSymbol,
       direction,
       ordertype,
-      sl_pips: slVal,
-      tp_pips: tpVal,
+      sl_pips: finalSl,
+      tp_pips: finalTp,
       offset_pips: offsetVal,
     };
 
-    if (riskPerc > 0) {
-      payload.risk = riskPerc;
+    if (finalRisk > 0) {
+      payload.risk = finalRisk;
       payload.qty = 0.0;
+    } else if (finalLots > 0) {
+      payload.qty = finalLots;
+      payload.risk = 0.0;
     } else {
-      payload.qty = lotsVal;
+      payload.qty = 0.0;
       payload.risk = 0.0;
     }
 
@@ -1259,13 +1285,35 @@ export default function Dashboard() {
                         </div>
                       </div>
 
+                      {/* Default Toggle Row */}
+                      <div className={`flex items-center justify-between px-2.5 py-1.5 rounded-lg border transition-all ${
+                        theme === 'dark'
+                          ? 'bg-neutral-950/45 border-neutral-800/80'
+                          : 'bg-neutral-50 border-neutral-200'
+                      }`}>
+                        <span className={`text-[10px] font-bold ${theme === 'dark' ? 'text-neutral-400' : 'text-neutral-650'}`}>Use Default (Micro Settings)</span>
+                        <button
+                          onClick={() => setLimitUseDefault(prev => !prev)}
+                          className={`text-[9.5px] uppercase tracking-wider font-extrabold px-3 py-1 rounded transition-all active:scale-95 border ${
+                            limitUseDefault
+                              ? 'bg-amber-600 border-amber-500 text-white shadow-sm'
+                              : theme === 'dark'
+                                ? 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-neutral-200'
+                                : 'bg-white border-neutral-200 text-neutral-550 hover:text-neutral-700'
+                          }`}
+                        >
+                          {limitUseDefault ? 'Active' : 'Off'}
+                        </button>
+                      </div>
+
                       {/* SL & TP Pips */}
                       <div className="grid grid-cols-2 gap-2">
                         <div className="flex flex-col gap-1">
                           <label className={`text-[9px] px-1 font-bold ${theme === 'dark' ? 'text-neutral-500' : 'text-neutral-450'}`}>Stop Loss Pips</label>
                           <input
                             type="number"
-                            value={limitSlPips}
+                            value={limitUseDefault ? computedDefaultSl.toString() : limitSlPips}
+                            disabled={limitUseDefault}
                             onChange={(e) => {
                               setLimitSlPips(e.target.value);
                               const v = parseFloat(e.target.value);
@@ -1274,7 +1322,7 @@ export default function Dashboard() {
                               }
                             }}
                             placeholder="SL pips"
-                            className={`w-full border rounded-lg px-2.5 py-1.5 text-xs font-mono transition-all font-semibold focus:outline-none ${
+                            className={`w-full border rounded-lg px-2.5 py-1.5 text-xs font-mono transition-all font-semibold focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed ${
                               theme === 'dark'
                                 ? 'bg-neutral-900/85 border-neutral-800 text-neutral-200 focus:border-neutral-600'
                                 : 'bg-white border-neutral-200 text-neutral-800 focus:border-neutral-400'
@@ -1285,10 +1333,11 @@ export default function Dashboard() {
                           <label className={`text-[9px] px-1 font-bold ${theme === 'dark' ? 'text-neutral-500' : 'text-neutral-450'}`}>Take Profit Pips</label>
                           <input
                             type="number"
-                            value={limitTpPips}
+                            value={limitUseDefault ? computedDefaultTp.toString() : limitTpPips}
+                            disabled={limitUseDefault}
                             onChange={(e) => setLimitTpPips(e.target.value)}
                             placeholder="TP pips"
-                            className={`w-full border rounded-lg px-2.5 py-1.5 text-xs font-mono transition-all font-semibold focus:outline-none ${
+                            className={`w-full border rounded-lg px-2.5 py-1.5 text-xs font-mono transition-all font-semibold focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed ${
                               theme === 'dark'
                                 ? 'bg-neutral-900/85 border-neutral-800 text-neutral-200 focus:border-neutral-600'
                                 : 'bg-white border-neutral-200 text-neutral-800 focus:border-neutral-400'
@@ -1304,7 +1353,8 @@ export default function Dashboard() {
                           <div className="flex gap-1.5">
                             <button
                               onClick={() => setLimitSizingMode('risk')}
-                              className={`text-[8px] uppercase tracking-wider font-extrabold px-1.5 py-0.5 rounded transition-all ${
+                              disabled={limitUseDefault}
+                              className={`text-[8px] uppercase tracking-wider font-extrabold px-1.5 py-0.5 rounded transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
                                 limitSizingMode === 'risk'
                                   ? (theme === 'dark' ? 'bg-neutral-800 text-white' : 'bg-neutral-200 text-neutral-800')
                                   : 'text-neutral-500 hover:text-neutral-350'
@@ -1314,7 +1364,8 @@ export default function Dashboard() {
                             </button>
                             <button
                               onClick={() => setLimitSizingMode('lots')}
-                              className={`text-[8px] uppercase tracking-wider font-extrabold px-1.5 py-0.5 rounded transition-all ${
+                              disabled={limitUseDefault}
+                              className={`text-[8px] uppercase tracking-wider font-extrabold px-1.5 py-0.5 rounded transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
                                 limitSizingMode === 'lots'
                                   ? (theme === 'dark' ? 'bg-neutral-800 text-white' : 'bg-neutral-200 text-neutral-800')
                                   : 'text-neutral-500 hover:text-neutral-350'
@@ -1328,10 +1379,11 @@ export default function Dashboard() {
                         <input
                           type="number"
                           step={limitSizingMode === 'risk' ? '0.1' : '0.01'}
-                          value={limitSizingMode === 'risk' ? limitRiskPerc : limitLots}
+                          value={limitUseDefault ? '' : (limitSizingMode === 'risk' ? limitRiskPerc : limitLots)}
+                          disabled={limitUseDefault}
                           onChange={(e) => limitSizingMode === 'risk' ? setLimitRiskPerc(e.target.value) : setLimitLots(e.target.value)}
-                          placeholder={limitSizingMode === 'risk' ? 'Risk %' : 'Lots'}
-                          className={`w-full border rounded-lg px-3 py-2 text-xs font-mono transition-all font-semibold focus:outline-none ${
+                          placeholder={limitUseDefault ? 'Default (copier settings)' : (limitSizingMode === 'risk' ? 'Risk %' : 'Lots')}
+                          className={`w-full border rounded-lg px-3 py-2 text-xs font-mono transition-all font-semibold focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed ${
                             theme === 'dark'
                               ? 'bg-neutral-900/85 border-neutral-800 text-neutral-200 focus:border-neutral-600'
                               : 'bg-white border-neutral-200 text-neutral-800 focus:border-neutral-400'

@@ -1,5 +1,5 @@
 {
-    "TimeStop": 180,
+    "TimeStop": 43200,
     "GlobalNames": [
         "EURUSD",
         "GBPUSD",
