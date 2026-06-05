@@ -152,6 +152,7 @@ export default function Dashboard() {
   const [limitRiskPerc, setLimitRiskPerc] = useState<string>('2.0');
   const [limitLots, setLimitLots] = useState<string>('1.0');
   const [limitUseDefault, setLimitUseDefault] = useState<boolean>(true);
+  const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
   
   // 4. Modify Order Mode
   const [modifyOffsetBuy, setModifyOffsetBuy] = useState<string>('5.0');
@@ -1255,33 +1256,97 @@ export default function Dashboard() {
                     <div className="flex flex-col gap-3">
                       {/* Offset Inputs */}
                       <div className="grid grid-cols-2 gap-2">
-                        <div className="flex flex-col gap-1">
+                        <div className="flex flex-col gap-1" data-dropdown-container>
                           <label className={`text-[9px] px-1 font-bold ${theme === 'dark' ? 'text-neutral-500' : 'text-neutral-450'}`}>Buy Offset Pips</label>
-                          <input
-                            type="number"
-                            value={entryOffsetBuy}
-                            onChange={(e) => setEntryOffsetBuy(e.target.value)}
-                            placeholder="Buy offset"
-                            className={`w-full border rounded-lg px-2.5 py-1.5 text-xs font-mono transition-all font-semibold focus:outline-none ${
-                              theme === 'dark'
-                                ? 'bg-neutral-900/85 border-neutral-800 text-neutral-200 focus:border-neutral-600'
-                                : 'bg-white border-neutral-200 text-neutral-800 focus:border-neutral-400'
-                            }`}
-                          />
+                          <div className="relative flex items-center">
+                            <input
+                              type="number"
+                              value={entryOffsetBuy}
+                              onChange={(e) => setEntryOffsetBuy(e.target.value)}
+                              placeholder="Buy offset"
+                              className={`w-full pr-7 border rounded-lg px-2.5 py-1.5 text-xs font-mono transition-all font-semibold focus:outline-none ${
+                                theme === 'dark'
+                                  ? 'bg-neutral-900/85 border-neutral-800 text-neutral-200 focus:border-neutral-600'
+                                  : 'bg-white border-neutral-200 text-neutral-800 focus:border-neutral-400'
+                              }`}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setActiveDropdown(prev => prev === 'entryOffsetBuy' ? null : 'entryOffsetBuy')}
+                              className={`absolute right-1 text-[9px] px-1.5 py-1 hover:bg-neutral-800/10 dark:hover:bg-neutral-800 rounded transition-all ${
+                                theme === 'dark' ? 'text-neutral-500 hover:text-neutral-300' : 'text-neutral-400 hover:text-neutral-600'
+                              }`}
+                            >
+                              ▼
+                            </button>
+                            {activeDropdown === 'entryOffsetBuy' && (
+                              <div className={`absolute top-8 right-0 z-50 border rounded shadow-lg flex flex-col gap-1 p-1 w-20 text-[10px] font-bold ${
+                                theme === 'dark' ? 'bg-neutral-900 border-neutral-800 text-neutral-200' : 'bg-white border-neutral-200 text-neutral-800'
+                              }`}>
+                                {['0.0', '1.0', '5.0', '10.0', '20.0'].map(val => (
+                                  <button
+                                    key={val}
+                                    type="button"
+                                    onClick={() => {
+                                      setEntryOffsetBuy(val);
+                                      setActiveDropdown(null);
+                                    }}
+                                    className={`text-left px-2 py-1 rounded transition-all ${
+                                      theme === 'dark' ? 'hover:bg-neutral-800' : 'hover:bg-neutral-100'
+                                    }`}
+                                  >
+                                    {val} pips
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
                         </div>
-                        <div className="flex flex-col gap-1">
+                        <div className="flex flex-col gap-1" data-dropdown-container>
                           <label className={`text-[9px] px-1 font-bold ${theme === 'dark' ? 'text-neutral-500' : 'text-neutral-450'}`}>Sell Offset Pips</label>
-                          <input
-                            type="number"
-                            value={entryOffsetSell}
-                            onChange={(e) => setEntryOffsetSell(e.target.value)}
-                            placeholder="Sell offset"
-                            className={`w-full border rounded-lg px-2.5 py-1.5 text-xs font-mono transition-all font-semibold focus:outline-none ${
-                              theme === 'dark'
-                                ? 'bg-neutral-900/85 border-neutral-800 text-neutral-200 focus:border-neutral-600'
-                                : 'bg-white border-neutral-200 text-neutral-800 focus:border-neutral-400'
-                            }`}
-                          />
+                          <div className="relative flex items-center">
+                            <input
+                              type="number"
+                              value={entryOffsetSell}
+                              onChange={(e) => setEntryOffsetSell(e.target.value)}
+                              placeholder="Sell offset"
+                              className={`w-full pr-7 border rounded-lg px-2.5 py-1.5 text-xs font-mono transition-all font-semibold focus:outline-none ${
+                                theme === 'dark'
+                                  ? 'bg-neutral-900/85 border-neutral-800 text-neutral-200 focus:border-neutral-600'
+                                  : 'bg-white border-neutral-200 text-neutral-800 focus:border-neutral-400'
+                              }`}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setActiveDropdown(prev => prev === 'entryOffsetSell' ? null : 'entryOffsetSell')}
+                              className={`absolute right-1 text-[9px] px-1.5 py-1 hover:bg-neutral-800/10 dark:hover:bg-neutral-800 rounded transition-all ${
+                                theme === 'dark' ? 'text-neutral-500 hover:text-neutral-300' : 'text-neutral-400 hover:text-neutral-600'
+                              }`}
+                            >
+                              ▼
+                            </button>
+                            {activeDropdown === 'entryOffsetSell' && (
+                              <div className={`absolute top-8 right-0 z-50 border rounded shadow-lg flex flex-col gap-1 p-1 w-20 text-[10px] font-bold ${
+                                theme === 'dark' ? 'bg-neutral-900 border-neutral-800 text-neutral-200' : 'bg-white border-neutral-200 text-neutral-800'
+                              }`}>
+                                {['0.0', '1.0', '5.0', '10.0', '20.0'].map(val => (
+                                  <button
+                                    key={val}
+                                    type="button"
+                                    onClick={() => {
+                                      setEntryOffsetSell(val);
+                                      setActiveDropdown(null);
+                                    }}
+                                    className={`text-left px-2 py-1 rounded transition-all ${
+                                      theme === 'dark' ? 'hover:bg-neutral-800' : 'hover:bg-neutral-100'
+                                    }`}
+                                  >
+                                    {val} pips
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
 
@@ -1539,27 +1604,63 @@ export default function Dashboard() {
                       </div>
 
                       {/* Modify Offset Input depending on direction */}
-                      <div className="flex flex-col gap-1">
+                      <div className="flex flex-col gap-1" data-dropdown-container>
                         <label className={`text-[10px] px-1 font-bold ${theme === 'dark' ? 'text-neutral-500' : 'text-neutral-450'}`}>
                           Offset Pips
                         </label>
-                        <input
-                          type="number"
-                          value={pendingOrder.direction === 'BUY' ? modifyOffsetBuy : modifyOffsetSell}
-                          onChange={(e) => {
-                            if (pendingOrder.direction === 'BUY') {
-                              setModifyOffsetBuy(e.target.value);
-                            } else {
-                              setModifyOffsetSell(e.target.value);
-                            }
-                          }}
-                          placeholder="Offset pips"
-                          className={`w-full border rounded-lg px-3 py-2 text-xs font-mono transition-all font-semibold focus:outline-none ${
-                            theme === 'dark'
-                              ? 'bg-neutral-900/85 border-neutral-800 text-neutral-200 focus:border-neutral-600'
-                              : 'bg-white border-neutral-200 text-neutral-800 focus:border-neutral-400'
-                          }`}
-                        />
+                        <div className="relative flex items-center">
+                          <input
+                            type="number"
+                            value={pendingOrder.direction === 'BUY' ? modifyOffsetBuy : modifyOffsetSell}
+                            onChange={(e) => {
+                              if (pendingOrder.direction === 'BUY') {
+                                setModifyOffsetBuy(e.target.value);
+                              } else {
+                                setModifyOffsetSell(e.target.value);
+                              }
+                            }}
+                            placeholder="Offset pips"
+                            className={`w-full pr-7 border rounded-lg px-3 py-2 text-xs font-mono transition-all font-semibold focus:outline-none ${
+                              theme === 'dark'
+                                ? 'bg-neutral-900/85 border-neutral-800 text-neutral-200 focus:border-neutral-600'
+                                : 'bg-white border-neutral-200 text-neutral-800 focus:border-neutral-400'
+                            }`}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setActiveDropdown(prev => prev === (pendingOrder.direction === 'BUY' ? 'modifyOffsetBuy' : 'modifyOffsetSell') ? null : (pendingOrder.direction === 'BUY' ? 'modifyOffsetBuy' : 'modifyOffsetSell'))}
+                            className={`absolute right-1 text-[9px] px-1.5 py-1 hover:bg-neutral-800/10 dark:hover:bg-neutral-800 rounded transition-all ${
+                              theme === 'dark' ? 'text-neutral-500 hover:text-neutral-300' : 'text-neutral-400 hover:text-neutral-600'
+                            }`}
+                          >
+                            ▼
+                          </button>
+                          {activeDropdown === (pendingOrder.direction === 'BUY' ? 'modifyOffsetBuy' : 'modifyOffsetSell') && (
+                            <div className={`absolute top-10 right-0 z-50 border rounded shadow-lg flex flex-col gap-1 p-1 w-20 text-[10px] font-bold ${
+                              theme === 'dark' ? 'bg-neutral-900 border-neutral-800 text-neutral-200' : 'bg-white border-neutral-200 text-neutral-800'
+                            }`}>
+                              {['0.0', '1.0', '5.0', '10.0', '20.0'].map(val => (
+                                <button
+                                  key={val}
+                                  type="button"
+                                  onClick={() => {
+                                    if (pendingOrder.direction === 'BUY') {
+                                      setModifyOffsetBuy(val);
+                                    } else {
+                                      setModifyOffsetSell(val);
+                                    }
+                                    setActiveDropdown(null);
+                                  }}
+                                  className={`text-left px-2 py-1 rounded transition-all ${
+                                    theme === 'dark' ? 'hover:bg-neutral-800' : 'hover:bg-neutral-100'
+                                  }`}
+                                >
+                                  {val} pips
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </div>
 
                       {/* Modify Actions Matrix */}
@@ -1703,18 +1804,50 @@ export default function Dashboard() {
                         </button>
 
                         <div className="grid grid-cols-2 gap-2 mt-1">
-                          <div className="flex flex-col gap-1">
-                            <input
-                              type="number"
-                              value={manageSlEntryPips}
-                              onChange={(e) => setManageSlEntryPips(e.target.value)}
-                              placeholder="From Entry"
-                              className={`w-full border rounded-lg px-2.5 py-1.5 text-[11px] font-mono transition-all font-semibold focus:outline-none ${
-                                theme === 'dark'
-                                  ? 'bg-neutral-900/85 border-neutral-850 text-neutral-250 focus:border-neutral-600'
-                                  : 'bg-white border-neutral-200 text-neutral-800 focus:border-neutral-400'
-                              }`}
-                            />
+                          <div className="flex flex-col gap-1" data-dropdown-container>
+                            <div className="relative flex items-center">
+                              <input
+                                type="number"
+                                value={manageSlEntryPips}
+                                onChange={(e) => setManageSlEntryPips(e.target.value)}
+                                placeholder="From Entry"
+                                className={`w-full pr-7 border rounded-lg px-2.5 py-1.5 text-[11px] font-mono transition-all font-semibold focus:outline-none ${
+                                  theme === 'dark'
+                                    ? 'bg-neutral-900/85 border-neutral-850 text-neutral-250 focus:border-neutral-600'
+                                    : 'bg-white border-neutral-200 text-neutral-800 focus:border-neutral-400'
+                                }`}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setActiveDropdown(prev => prev === 'manageSlEntryPips' ? null : 'manageSlEntryPips')}
+                                className={`absolute right-1 text-[9px] px-1.5 py-1 hover:bg-neutral-800/10 dark:hover:bg-neutral-800 rounded transition-all ${
+                                  theme === 'dark' ? 'text-neutral-500 hover:text-neutral-300' : 'text-neutral-400 hover:text-neutral-600'
+                                }`}
+                              >
+                                ▼
+                              </button>
+                              {activeDropdown === 'manageSlEntryPips' && (
+                                <div className={`absolute top-8 right-0 z-50 border rounded shadow-lg flex flex-col gap-1 p-1 w-20 text-[10px] font-bold ${
+                                  theme === 'dark' ? 'bg-neutral-900 border-neutral-800 text-neutral-200' : 'bg-white border-neutral-200 text-neutral-800'
+                                }`}>
+                                  {['0.0', '1.0', '5.0', '10.0', '20.0'].map(val => (
+                                    <button
+                                      key={val}
+                                      type="button"
+                                      onClick={() => {
+                                        setManageSlEntryPips(val);
+                                        setActiveDropdown(null);
+                                      }}
+                                      className={`text-left px-2 py-1 rounded transition-all ${
+                                        theme === 'dark' ? 'hover:bg-neutral-800' : 'hover:bg-neutral-100'
+                                      }`}
+                                    >
+                                      {val} pips
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
                             <button
                               onClick={() => handleManagePosition('sl_entry')}
                               className="py-1 rounded bg-neutral-900 hover:bg-neutral-850 text-neutral-300 text-[8px] font-bold uppercase border border-neutral-850 active:scale-95 transition-all"
@@ -1723,18 +1856,50 @@ export default function Dashboard() {
                             </button>
                           </div>
 
-                          <div className="flex flex-col gap-1">
-                            <input
-                              type="number"
-                              value={manageSlMidPips}
-                              onChange={(e) => setManageSlMidPips(e.target.value)}
-                              placeholder="From Mid"
-                              className={`w-full border rounded-lg px-2.5 py-1.5 text-[11px] font-mono transition-all font-semibold focus:outline-none ${
-                                theme === 'dark'
-                                  ? 'bg-neutral-900/85 border-neutral-855 text-neutral-250 focus:border-neutral-600'
-                                  : 'bg-white border-neutral-200 text-neutral-800 focus:border-neutral-400'
-                              }`}
-                            />
+                          <div className="flex flex-col gap-1" data-dropdown-container>
+                            <div className="relative flex items-center">
+                              <input
+                                type="number"
+                                value={manageSlMidPips}
+                                onChange={(e) => setManageSlMidPips(e.target.value)}
+                                placeholder="From Mid"
+                                className={`w-full pr-7 border rounded-lg px-2.5 py-1.5 text-[11px] font-mono transition-all font-semibold focus:outline-none ${
+                                  theme === 'dark'
+                                    ? 'bg-neutral-900/85 border-neutral-855 text-neutral-250 focus:border-neutral-600'
+                                    : 'bg-white border-neutral-200 text-neutral-800 focus:border-neutral-400'
+                                }`}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setActiveDropdown(prev => prev === 'manageSlMidPips' ? null : 'manageSlMidPips')}
+                                className={`absolute right-1 text-[9px] px-1.5 py-1 hover:bg-neutral-800/10 dark:hover:bg-neutral-800 rounded transition-all ${
+                                  theme === 'dark' ? 'text-neutral-500 hover:text-neutral-300' : 'text-neutral-400 hover:text-neutral-600'
+                                }`}
+                              >
+                                ▼
+                              </button>
+                              {activeDropdown === 'manageSlMidPips' && (
+                                <div className={`absolute top-8 right-0 z-50 border rounded shadow-lg flex flex-col gap-1 p-1 w-20 text-[10px] font-bold ${
+                                  theme === 'dark' ? 'bg-neutral-900 border-neutral-800 text-neutral-200' : 'bg-white border-neutral-200 text-neutral-800'
+                                }`}>
+                                  {['0.0', '1.0', '5.0', '10.0', '20.0'].map(val => (
+                                    <button
+                                      key={val}
+                                      type="button"
+                                      onClick={() => {
+                                        setManageSlMidPips(val);
+                                        setActiveDropdown(null);
+                                      }}
+                                      className={`text-left px-2 py-1 rounded transition-all ${
+                                        theme === 'dark' ? 'hover:bg-neutral-800' : 'hover:bg-neutral-100'
+                                      }`}
+                                    >
+                                      {val} pips
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
                             <button
                               onClick={() => handleManagePosition('sl_mid')}
                               className="py-1 rounded bg-neutral-900 hover:bg-neutral-850 text-neutral-300 text-[8px] font-bold uppercase border border-neutral-855 active:scale-95 transition-all"
@@ -1752,18 +1917,50 @@ export default function Dashboard() {
                         </span>
 
                         <div className="grid grid-cols-2 gap-2">
-                          <div className="flex flex-col gap-1">
-                            <input
-                              type="number"
-                              value={manageTpEntryPips}
-                              onChange={(e) => setManageTpEntryPips(e.target.value)}
-                              placeholder="From Entry"
-                              className={`w-full border rounded-lg px-2.5 py-1.5 text-[11px] font-mono transition-all font-semibold focus:outline-none ${
-                                theme === 'dark'
-                                  ? 'bg-neutral-900/85 border-neutral-850 text-neutral-250 focus:border-neutral-600'
-                                  : 'bg-white border-neutral-200 text-neutral-800 focus:border-neutral-400'
-                              }`}
-                            />
+                          <div className="flex flex-col gap-1" data-dropdown-container>
+                            <div className="relative flex items-center">
+                              <input
+                                type="number"
+                                value={manageTpEntryPips}
+                                onChange={(e) => setManageTpEntryPips(e.target.value)}
+                                placeholder="From Entry"
+                                className={`w-full pr-7 border rounded-lg px-2.5 py-1.5 text-[11px] font-mono transition-all font-semibold focus:outline-none ${
+                                  theme === 'dark'
+                                    ? 'bg-neutral-900/85 border-neutral-850 text-neutral-250 focus:border-neutral-600'
+                                    : 'bg-white border-neutral-200 text-neutral-800 focus:border-neutral-400'
+                                }`}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setActiveDropdown(prev => prev === 'manageTpEntryPips' ? null : 'manageTpEntryPips')}
+                                className={`absolute right-1 text-[9px] px-1.5 py-1 hover:bg-neutral-800/10 dark:hover:bg-neutral-800 rounded transition-all ${
+                                  theme === 'dark' ? 'text-neutral-500 hover:text-neutral-300' : 'text-neutral-400 hover:text-neutral-600'
+                                }`}
+                              >
+                                ▼
+                              </button>
+                              {activeDropdown === 'manageTpEntryPips' && (
+                                <div className={`absolute top-8 right-0 z-50 border rounded shadow-lg flex flex-col gap-1 p-1 w-20 text-[10px] font-bold ${
+                                  theme === 'dark' ? 'bg-neutral-900 border-neutral-800 text-neutral-200' : 'bg-white border-neutral-200 text-neutral-800'
+                                }`}>
+                                  {['0.0', '1.0', '5.0', '10.0', '20.0'].map(val => (
+                                    <button
+                                      key={val}
+                                      type="button"
+                                      onClick={() => {
+                                        setManageTpEntryPips(val);
+                                        setActiveDropdown(null);
+                                      }}
+                                      className={`text-left px-2 py-1 rounded transition-all ${
+                                        theme === 'dark' ? 'hover:bg-neutral-800' : 'hover:bg-neutral-100'
+                                      }`}
+                                    >
+                                      {val} pips
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
                             <button
                               onClick={() => handleManagePosition('tp_entry')}
                               className="py-1 rounded bg-neutral-900 hover:bg-neutral-850 text-neutral-300 text-[8px] font-bold uppercase border border-neutral-850 active:scale-95 transition-all"
@@ -1772,18 +1969,50 @@ export default function Dashboard() {
                             </button>
                           </div>
 
-                          <div className="flex flex-col gap-1">
-                            <input
-                              type="number"
-                              value={manageTpMidPips}
-                              onChange={(e) => setManageTpMidPips(e.target.value)}
-                              placeholder="From Mid"
-                              className={`w-full border rounded-lg px-2.5 py-1.5 text-[11px] font-mono transition-all font-semibold focus:outline-none ${
-                                theme === 'dark'
-                                  ? 'bg-neutral-900/85 border-neutral-850 text-neutral-250 focus:border-neutral-600'
-                                  : 'bg-white border-neutral-200 text-neutral-800 focus:border-neutral-400'
-                              }`}
-                            />
+                          <div className="flex flex-col gap-1" data-dropdown-container>
+                            <div className="relative flex items-center">
+                              <input
+                                type="number"
+                                value={manageTpMidPips}
+                                onChange={(e) => setManageTpMidPips(e.target.value)}
+                                placeholder="From Mid"
+                                className={`w-full pr-7 border rounded-lg px-2.5 py-1.5 text-[11px] font-mono transition-all font-semibold focus:outline-none ${
+                                  theme === 'dark'
+                                    ? 'bg-neutral-900/85 border-neutral-850 text-neutral-250 focus:border-neutral-600'
+                                    : 'bg-white border-neutral-200 text-neutral-800 focus:border-neutral-400'
+                                }`}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setActiveDropdown(prev => prev === 'manageTpMidPips' ? null : 'manageTpMidPips')}
+                                className={`absolute right-1 text-[9px] px-1.5 py-1 hover:bg-neutral-800/10 dark:hover:bg-neutral-800 rounded transition-all ${
+                                  theme === 'dark' ? 'text-neutral-500 hover:text-neutral-300' : 'text-neutral-400 hover:text-neutral-600'
+                                }`}
+                              >
+                                ▼
+                              </button>
+                              {activeDropdown === 'manageTpMidPips' && (
+                                <div className={`absolute top-8 right-0 z-50 border rounded shadow-lg flex flex-col gap-1 p-1 w-20 text-[10px] font-bold ${
+                                  theme === 'dark' ? 'bg-neutral-900 border-neutral-800 text-neutral-200' : 'bg-white border-neutral-200 text-neutral-800'
+                                }`}>
+                                  {['0.0', '1.0', '5.0', '10.0', '20.0'].map(val => (
+                                    <button
+                                      key={val}
+                                      type="button"
+                                      onClick={() => {
+                                        setManageTpMidPips(val);
+                                        setActiveDropdown(null);
+                                      }}
+                                      className={`text-left px-2 py-1 rounded transition-all ${
+                                        theme === 'dark' ? 'hover:bg-neutral-800' : 'hover:bg-neutral-100'
+                                      }`}
+                                    >
+                                      {val} pips
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
                             <button
                               onClick={() => handleManagePosition('tp_mid')}
                               className="py-1 rounded bg-neutral-900 hover:bg-neutral-850 text-neutral-300 text-[8px] font-bold uppercase border border-neutral-850 active:scale-95 transition-all"
