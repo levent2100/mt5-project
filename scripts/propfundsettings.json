@@ -27,7 +27,7 @@
         "BTC": 25.0
     },
     "ReferenceAccType": "MT5Accounts",
-    "ReferenceAccName": "25329254",
+    "ReferenceAccName": "55859704",
     "FutureAccounts": {
         "trade_enabled": false,
         "ip_port": "http://127.0.0.1:58800",
@@ -74,11 +74,11 @@
         "Accounts": [
             {
                 "trade_enabled": true,
-                "Company": "1_TickMill_Demo_10k",
+                "Company": "1_TickMill_Real_500",
                 "AccType": "AccType dontcare",
                 "EvalCost": 0.0,
                 "ActivationCost": 0.0,
-                "name": "25329254",
+                "name": "55859704",
                 "AccSize": 100000.0,
                 "MaxLoss": 10000.0,
                 "EvalTarget": 10000.0,
@@ -623,7 +623,7 @@
                 }
             },
             {
-                "trade_enabled": true,
+                "trade_enabled": false,
                 "Company": "11_FTMO_Demo_100k",
                 "AccType": "AccType dontcare",
                 "EvalCost": 0.0,
