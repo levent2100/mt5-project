@@ -27,7 +27,7 @@
         "BTC": 25.0
     },
     "ReferenceAccType": "MT5Accounts",
-    "ReferenceAccName": "55859704",
+    "ReferenceAccName": "25329254",
     "FutureAccounts": {
         "trade_enabled": false,
         "ip_port": "http://127.0.0.1:58800",
@@ -78,7 +78,7 @@
                 "AccType": "AccType dontcare",
                 "EvalCost": 0.0,
                 "ActivationCost": 0.0,
-                "name": "55859704",
+                "name": "25329254",
                 "AccSize": 100000.0,
                 "MaxLoss": 10000.0,
                 "EvalTarget": 10000.0,
