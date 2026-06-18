@@ -30,6 +30,14 @@ class Config:
             raise e
 
     @property
+    def sl_atr_multiplier(self) -> float:
+        return float(self.data.get("SL_ATR_Multiplier", 1.0))
+
+    @property
+    def tp_multiplier(self) -> float:
+        return float(self.data.get("TP_Multiplier", 2.0))
+
+    @property
     def global_names(self) -> List[str]:
         return self.data.get("GlobalNames", [])
 

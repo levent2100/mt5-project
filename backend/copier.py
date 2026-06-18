@@ -60,11 +60,11 @@ class TradeCopier:
             atr_pips = raw_atr / point_value if point_value > 0 else raw_atr
             spread_pips = raw_spread / point_value if point_value > 0 else raw_spread
             
-            # Stop-loss in pips is 1X ATR + spread
-            calculated_sl = atr_pips + spread_pips
+            # Stop-loss in pips is SL_ATR_Multiplier * ATR + spread
+            settings.load()
+            calculated_sl = settings.sl_atr_multiplier * atr_pips + spread_pips
             
             # Floor safety constraint: cannot be smaller than DefaultSLPips
-            settings.load()
             default_sl_dict = settings.default_sl_pips
             default_sl = float(default_sl_dict.get(symbol_global, 0.0))
             
@@ -104,9 +104,9 @@ class TradeCopier:
             else:
                 sl_pips = min_sl
 
-        # Default TP to 2.0 * SL if not specified
+        # Default TP to TP_Multiplier * SL if not specified
         if tp_pips == 0 and sl_pips > 0:
-            tp_pips = 2.0 * sl_pips
+            tp_pips = settings.tp_multiplier * sl_pips
 
         active_accounts = self.get_active_accounts()
         if not active_accounts:

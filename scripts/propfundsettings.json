@@ -1,5 +1,7 @@
 {
     "TimeStop": 43200,
+    "SL_ATR_Multiplier": 1.0,
+    "TP_Multiplier": 5.0,
     "GlobalNames": [
         "EURUSD",
         "GBPUSD",
@@ -85,7 +87,7 @@
                 "Multiplier": 10,
                 "ip_port": "http://127.0.0.1:58801",
                 "ExePath": "C:\\Program Files\\MetaTrader 5_1\\terminal64.exe",
-                "RiskPerc": 1.0,
+                "RiskPerc": 5.0,
                 "IsRiskBased": true,
                 "NameConversions": {
                     "EURUSD": "EURUSD",

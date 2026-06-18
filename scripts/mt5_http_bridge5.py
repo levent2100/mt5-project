@@ -764,10 +764,11 @@ class RequestHandler(BaseHTTPRequestHandler):
                         # Fallback to ATR-based default SL if not specified
                         real_atr = calculate_atr(instrument)
                         if real_atr is not None and real_atr > 0:
-                            # 1X ATR + spread, floored at DefaultSLPips
+                            global_cfg = get_global_settings()
+                            sl_multiplier = float(global_cfg.get("SL_ATR_Multiplier", 1.0))
                             tick = mt5.symbol_info_tick(instrument)
                             spread = (tick.ask - tick.bid) if (tick and tick.ask > 0 and tick.bid > 0) else 0.0
-                            calculated_sl = real_atr + spread
+                            calculated_sl = sl_multiplier * real_atr + spread
                             
                             acc_settings = get_account_settings(account_info.login)
                             name_conversions = acc_settings.get("NameConversions", {})
@@ -777,7 +778,6 @@ class RequestHandler(BaseHTTPRequestHandler):
                                     global_symbol = g_sym
                                     break
                             
-                            global_cfg = get_global_settings()
                             default_sl_pips = float(global_cfg.get("DefaultSLPips", {}).get(global_symbol, 0.0))
                             point_value = float(acc_settings.get("DefaultPointValue", {}).get(global_symbol, 0.0001))
                             
@@ -789,10 +789,11 @@ class RequestHandler(BaseHTTPRequestHandler):
                     if sl_pips <= 0:
                         real_atr = calculate_atr(instrument)
                         if real_atr is not None and real_atr > 0:
-                            # 1X ATR + spread, floored at DefaultSLPips
+                            global_cfg = get_global_settings()
+                            sl_multiplier = float(global_cfg.get("SL_ATR_Multiplier", 1.0))
                             tick = mt5.symbol_info_tick(instrument)
                             spread = (tick.ask - tick.bid) if (tick and tick.ask > 0 and tick.bid > 0) else 0.0
-                            calculated_sl = real_atr + spread
+                            calculated_sl = sl_multiplier * real_atr + spread
                             
                             acc_settings = get_account_settings(account_info.login)
                             name_conversions = acc_settings.get("NameConversions", {})
@@ -802,7 +803,6 @@ class RequestHandler(BaseHTTPRequestHandler):
                                     global_symbol = g_sym
                                     break
                             
-                            global_cfg = get_global_settings()
                             default_sl_pips = float(global_cfg.get("DefaultSLPips", {}).get(global_symbol, 0.0))
                             point_value = float(acc_settings.get("DefaultPointValue", {}).get(global_symbol, 0.0001))
                             
@@ -831,6 +831,10 @@ class RequestHandler(BaseHTTPRequestHandler):
                     elif o_type in ["offset", "offset_sell"]: price, order_type = ask + offset_val, mt5.ORDER_TYPE_SELL_LIMIT
                 
                 tp_pips = float(trade.get("tp_pips") or 0.0)
+                if tp_pips <= 0 and sl_pips > 0:
+                    global_cfg = get_global_settings()
+                    tp_multiplier = float(global_cfg.get("TP_Multiplier", 2.0))
+                    tp_pips = tp_multiplier * sl_pips
                 sl = price - sl_pips if is_buy else price + sl_pips
                 tp = price + tp_pips if is_buy else price - tp_pips
                 is_market = order_type in [mt5.ORDER_TYPE_BUY, mt5.ORDER_TYPE_SELL]
