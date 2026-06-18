@@ -178,11 +178,12 @@ class CockpitTester:
 
             # --- TEST 7: Pending Order Modification ---
             print("\n" + "="*60)
-            print("TEST 7: modify_order (Shifting pending order to MID price)")
+            print("TEST 7: modify_order (Shifting pending order price with offset)")
             print("="*60)
             resp = await self.send_request("modify_order", {
                 "symbol": "EURUSD",
-                "new_price_type": "mid"
+                "new_price_type": "offset",
+                "offset_pips": 10.0
             })
             if resp.get("status") == "ok":
                 print(f"[SUCCESS] Pending order modified successfully: {resp.get('data', {}).get('message')}")

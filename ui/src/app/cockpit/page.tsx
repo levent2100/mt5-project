@@ -360,7 +360,7 @@ export default function CockpitPanel() {
 
   const computedDefaultSl = useMemo(() => {
     if (!selectedSymbol) return 15.0;
-    return atrInfo ? Math.round(2.0 * atrInfo.atr_pips) : (defaultSlPips[selectedSymbol] || 15.0);
+    return atrInfo ? Math.round(atrInfo.atr_pips) : (defaultSlPips[selectedSymbol] || 15.0);
   }, [selectedSymbol, atrInfo, defaultSlPips]);
 
   const computedDefaultTp = useMemo(() => {
@@ -434,7 +434,7 @@ export default function CockpitPanel() {
     if (microAtrPips === null || microAtrPips <= 0) return showStatus('Wait for Micro ATR to resolve', 'warning');
 
     setMicroSubmitting(true);
-    const calculatedSl = Math.round(2.0 * microAtrPips);
+    const calculatedSl = Math.round(microAtrPips);
     showStatus(`Placing scaled-risk ${direction.toUpperCase()} (Micro Pad)...`, 'info', 1500);
 
     try {
@@ -486,7 +486,7 @@ export default function CockpitPanel() {
     let finalLots = lotsVal;
 
     if (entryMode === 'pending' && limitUseDefault) {
-      finalSl = atrInfo ? Math.round(2.0 * atrInfo.atr_pips) : (defaultSlPips[selectedSymbol] || 15.0);
+      finalSl = atrInfo ? Math.round(atrInfo.atr_pips) : (defaultSlPips[selectedSymbol] || 15.0);
       finalTp = finalSl * 2.0;
       finalRisk = 0;
       finalLots = 0;
@@ -2118,7 +2118,7 @@ export default function CockpitPanel() {
             }`}>
               <div className="flex justify-between items-center px-0.5">
                 <span className="text-[10px] font-extrabold uppercase tracking-wider text-neutral-400">Micro Execution Pad</span>
-                <span className="text-[8.5px] font-mono opacity-50">Scale-risk (2x ATR SL)</span>
+                <span className="text-[8.5px] font-mono opacity-50">Scale-risk (SL)</span>
               </div>
 
               {/* Micro Pad main controls */}
@@ -2155,7 +2155,7 @@ export default function CockpitPanel() {
                     <span className="w-8 h-3.5 bg-neutral-200 dark:bg-neutral-850 rounded animate-pulse" />
                   ) : microAtrPips !== null ? (
                     <span className="text-neutral-700 dark:text-neutral-200 font-extrabold">
-                      {Math.round(2.0 * microAtrPips)} <span className="text-[8.5px] font-normal opacity-60">pips</span>
+                      {Math.round(microAtrPips)} <span className="text-[8.5px] font-normal opacity-60">pips</span>
                     </span>
                   ) : (
                     <span className="opacity-50">N/A</span>

@@ -464,7 +464,7 @@ export default function Dashboard() {
 
   const computedDefaultSl = useMemo(() => {
     if (!selectedSymbol) return 15.0;
-    return atrInfo ? Math.round(2.0 * atrInfo.atr_pips) : (defaultSlPips[selectedSymbol] || 15.0);
+    return atrInfo ? Math.round(atrInfo.atr_pips) : (defaultSlPips[selectedSymbol] || 15.0);
   }, [selectedSymbol, atrInfo, defaultSlPips]);
 
   const computedDefaultTp = useMemo(() => {
@@ -531,7 +531,7 @@ export default function Dashboard() {
     let finalLots = lotsVal;
 
     if (entryMode === 'pending' && limitUseDefault) {
-      finalSl = atrInfo ? Math.round(2.0 * atrInfo.atr_pips) : (defaultSlPips[selectedSymbol] || 15.0);
+      finalSl = atrInfo ? Math.round(atrInfo.atr_pips) : (defaultSlPips[selectedSymbol] || 15.0);
       finalTp = finalSl * 2.0;
       finalRisk = 0;
       finalLots = 0;

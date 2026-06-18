@@ -52,28 +52,32 @@ class TradeCopier:
         client = BridgeClient(ip_port)
         res = await client._post("getatr", {"instrument": symbol_broker})
         if res.get("success", False):
-            # Calculate ATR in pips based on reference account's DefaultPointValue
+            # Calculate ATR and spread in pips based on reference account's DefaultPointValue
             raw_atr = float(res.get("atr", 0.0))
+            raw_spread = float(res.get("spread", 0.0))
             point_value_dict = ref_acc.get("DefaultPointValue", {})
             point_value = float(point_value_dict.get(symbol_global, 0.0001))
             atr_pips = raw_atr / point_value if point_value > 0 else raw_atr
+            spread_pips = raw_spread / point_value if point_value > 0 else raw_spread
             
-            # Dynamic Floor Safety Constraint: 2x ATR cannot be smaller than DefaultSLPips
+            # Stop-loss in pips is 1X ATR + spread
+            calculated_sl = atr_pips + spread_pips
+            
+            # Floor safety constraint: cannot be smaller than DefaultSLPips
             settings.load()
             default_sl_dict = settings.default_sl_pips
             default_sl = float(default_sl_dict.get(symbol_global, 0.0))
+            
+            final_sl_pips = calculated_sl
             if default_sl > 0:
-                min_atr_pips = default_sl / 2.0
-                if atr_pips < min_atr_pips:
-                    logger.info(f"[ATR FLOOR] Capping atr_pips for {symbol_global} at {min_atr_pips} (calculated: {atr_pips}) to satisfy 2x ATR >= {default_sl} pips.")
-                    atr_pips = min_atr_pips
-                    raw_atr = atr_pips * point_value
+                if final_sl_pips < default_sl:
+                    final_sl_pips = default_sl
             
             return {
                 "success": True,
                 "instrument": symbol_global,
-                "atr_raw": raw_atr,
-                "atr_pips": atr_pips
+                "atr_raw": final_sl_pips * point_value,
+                "atr_pips": final_sl_pips
             }
         return {"success": False, "error": res.get("error", "Failed to fetch ATR from bridge")}
 
@@ -94,7 +98,11 @@ class TradeCopier:
         default_sl_dict = settings.default_sl_pips
         min_sl = float(default_sl_dict.get(symbol_global, 0.0))
         if sl_pips <= 0:
-            sl_pips = min_sl
+            atr_res = await self.get_atr(symbol_global)
+            if atr_res.get("success"):
+                sl_pips = float(atr_res.get("atr_pips", min_sl))
+            else:
+                sl_pips = min_sl
 
         # Default TP to 2.0 * SL if not specified
         if tp_pips == 0 and sl_pips > 0:

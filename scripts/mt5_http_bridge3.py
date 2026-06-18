@@ -349,92 +349,164 @@ def get_latest_server_time():
 _atr_cache = {}
 _atr_cache_lock = threading.Lock()
 
-def calculate_atr(symbol, period=14):
-    """
-    Calculates advanced ATR on 1-minute chart:
-    - Long_ATR (7200 bars on M1) [Cached per M1 bar]
-    - Mid_ATR (14 bars on M1) [Cached per M1 bar]
-    - Short_ATR (5 bars on M1) [Cached per M1 bar]
-    - Spread10x (10 * current spread) [Calculated instantly]
-    Returns the maximum of these 4 values.
-    """
-    global _atr_cache
+def get_global_settings():
+    import os
+    paths = [
+        "/root/scripts/propfundsettings.json",
+        "/pjt_src/mt5-project/scripts/propfundsettings.json",
+        "scripts/propfundsettings.json",
+        "../scripts/propfundsettings.json"
+    ]
+    for path in paths:
+        if os.path.exists(path):
+            try:
+                with open(path, 'r') as f:
+                    return json.load(f)
+            except Exception as e:
+                logging.error(f"Error loading global settings from {path}: {e}")
+    return {}
+
+def get_bridge_active_symbols():
+    global_cfg = get_global_settings()
+    global_names = global_cfg.get("GlobalNames", [])
+    acc_cfg = get_account_settings(MT5_LOGIN if MT5_LOGIN > 0 else get_expected_login_by_port(PORT))
+    name_conversions = acc_cfg.get("NameConversions", {})
     
-    # Try fetching the latest M1 bar timestamp
-    rates_latest = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M1, 0, 1)
-    if rates_latest is None or len(rates_latest) == 0:
-        logging.error(f"Failed to copy latest M1 rate for {symbol}. Error: {mt5.last_error()}")
-        with _atr_cache_lock:
-            cached = _atr_cache.get(symbol)
-        if cached:
-            long_atr = cached["long_atr"]
-            mid_atr = cached["mid_atr"]
-            short_atr = cached["short_atr"]
-        else:
-            return None
-    else:
-        latest_time = int(rates_latest[0]['time'])
-        
-        with _atr_cache_lock:
-            cached = _atr_cache.get(symbol)
-            
-        if cached and cached.get("last_bar_time") == latest_time:
-            long_atr = cached["long_atr"]
-            mid_atr = cached["mid_atr"]
-            short_atr = cached["short_atr"]
-        else:
-            # Cache miss or expired M1 bar, recalculate historical components
-            rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M1, 0, 7500)
-            if rates is None or len(rates) < 15:
-                logging.error(f"Failed to copy historical rates for {symbol} on M1. Error: {mt5.last_error()}")
-                if cached:
-                    long_atr = cached["long_atr"]
-                    mid_atr = cached["mid_atr"]
-                    short_atr = cached["short_atr"]
-                else:
-                    return None
-            else:
+    active_symbols = []
+    for g_sym in global_names:
+        b_sym = name_conversions.get(g_sym, g_sym)
+        if b_sym and b_sym != "N/A":
+            active_symbols.append(b_sym)
+    return list(set(active_symbols))
+
+def atr_cache_updater():
+    logging.info("ATR Cache Updater thread started.")
+    while True:
+        try:
+            time.sleep(1.0)
+            if not mt5_manager.ensure_connection():
+                continue
+                
+            active_symbols = get_bridge_active_symbols()
+            if not active_symbols:
+                continue
+                
+            for symbol in active_symbols:
+                with mt5_manager.lock:
+                    ensure_symbol_selected(symbol)
+                    rates_latest = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M1, 0, 1)
+                
+                if rates_latest is None or len(rates_latest) == 0:
+                    continue
+                
+                latest_time = int(rates_latest[0]['time'])
+                
+                with _atr_cache_lock:
+                    cached = _atr_cache.get(symbol)
+                    
+                if cached and cached.get("last_bar_time") == latest_time:
+                    continue
+                
+                logging.info(f"Recalculating ATRs for {symbol} (new M1 bar time: {latest_time})")
+                with mt5_manager.lock:
+                    rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M1, 0, 14600)
+                
+                if rates is None or len(rates) < 15:
+                    logging.error(f"Failed to copy historical rates for {symbol} on M1. Error: {mt5.last_error()}")
+                    continue
+                
                 high = np.array([float(bar['high']) for bar in rates], dtype=np.float64)
                 low = np.array([float(bar['low']) for bar in rates], dtype=np.float64)
                 close = np.array([float(bar['close']) for bar in rates], dtype=np.float64)
-
-                # Short_ATR (5 bars)
-                short_atr_vals = talib.ATR(high, low, close, timeperiod=5)
-                short_atr = float(short_atr_vals[-1]) if short_atr_vals is not None and len(short_atr_vals) > 0 and not np.isnan(short_atr_vals[-1]) else 0.0
-
-                # Mid_ATR (14 bars)
-                mid_atr_vals = talib.ATR(high, low, close, timeperiod=14)
-                mid_atr = float(mid_atr_vals[-1]) if mid_atr_vals is not None and len(mid_atr_vals) > 0 and not np.isnan(mid_atr_vals[-1]) else 0.0
-
-                # Long_ATR (7200 bars)
-                long_period = 7200
+                
+                atr_vals_2 = talib.ATR(high, low, close, timeperiod=2)
+                atr_2 = float(atr_vals_2[-1]) if atr_vals_2 is not None and len(atr_vals_2) > 0 and not np.isnan(atr_vals_2[-1]) else 0.0
+                
+                atr_vals_3 = talib.ATR(high, low, close, timeperiod=3)
+                atr_3 = float(atr_vals_3[-1]) if atr_vals_3 is not None and len(atr_vals_3) > 0 and not np.isnan(atr_vals_3[-1]) else 0.0
+                
+                atr_vals_5 = talib.ATR(high, low, close, timeperiod=5)
+                atr_5 = float(atr_vals_5[-1]) if atr_vals_5 is not None and len(atr_vals_5) > 0 and not np.isnan(atr_vals_5[-1]) else 0.0
+                
+                atr_vals_14 = talib.ATR(high, low, close, timeperiod=14)
+                atr_14 = float(atr_vals_14[-1]) if atr_vals_14 is not None and len(atr_vals_14) > 0 and not np.isnan(atr_vals_14[-1]) else 0.0
+                
+                long_period = 14400
                 if len(rates) < long_period + 1:
                     long_period = len(rates) - 1
                 
-                if long_period >= 5:
-                    long_atr_vals = talib.ATR(high, low, close, timeperiod=long_period)
-                    long_atr = float(long_atr_vals[-1]) if long_atr_vals is not None and len(long_atr_vals) > 0 and not np.isnan(long_atr_vals[-1]) else 0.0
+                if long_period >= 2:
+                    atr_vals_14400 = talib.ATR(high, low, close, timeperiod=long_period)
+                    atr_14400 = float(atr_vals_14400[-1]) if atr_vals_14400 is not None and len(atr_vals_14400) > 0 and not np.isnan(atr_vals_14400[-1]) else 0.0
                 else:
-                    long_atr = 0.0
-
+                    atr_14400 = 0.0
+                
+                max_atr = max(atr_2, atr_3, atr_5, atr_14, atr_14400)
+                
                 with _atr_cache_lock:
                     _atr_cache[symbol] = {
                         "last_bar_time": latest_time,
-                        "long_atr": long_atr,
-                        "mid_atr": mid_atr,
-                        "short_atr": short_atr
+                        "max_atr": max_atr,
+                        "atr_2": atr_2,
+                        "atr_3": atr_3,
+                        "atr_5": atr_5,
+                        "atr_14": atr_14,
+                        "atr_14400": atr_14400
                     }
+        except Exception as e:
+            logging.error(f"Error in atr_cache_updater loop: {e}")
 
-    # Fetch live tick spread instantly (every second/tick)
-    tick = mt5.symbol_info_tick(symbol)
-    if tick and tick.ask > 0 and tick.bid > 0:
-        spread = tick.ask - tick.bid
-        spread10x = 10.0 * spread
+def calculate_atr(symbol, period=14):
+    with _atr_cache_lock:
+        cached = _atr_cache.get(symbol)
+    if cached:
+        return cached["max_atr"]
+    
+    logging.warning(f"ATR cache miss for {symbol}, performing synchronous fallback.")
+    rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M1, 0, 14600)
+    if rates is None or len(rates) < 5:
+        return 0.0
+        
+    high = np.array([float(bar['high']) for bar in rates], dtype=np.float64)
+    low = np.array([float(bar['low']) for bar in rates], dtype=np.float64)
+    close = np.array([float(bar['close']) for bar in rates], dtype=np.float64)
+    
+    atr_vals_2 = talib.ATR(high, low, close, timeperiod=2)
+    atr_2 = float(atr_vals_2[-1]) if atr_vals_2 is not None and len(atr_vals_2) > 0 and not np.isnan(atr_vals_2[-1]) else 0.0
+    
+    atr_vals_3 = talib.ATR(high, low, close, timeperiod=3)
+    atr_3 = float(atr_vals_3[-1]) if atr_vals_3 is not None and len(atr_vals_3) > 0 and not np.isnan(atr_vals_3[-1]) else 0.0
+    
+    atr_vals_5 = talib.ATR(high, low, close, timeperiod=5)
+    atr_5 = float(atr_vals_5[-1]) if atr_vals_5 is not None and len(atr_vals_5) > 0 and not np.isnan(atr_vals_5[-1]) else 0.0
+    
+    atr_vals_14 = talib.ATR(high, low, close, timeperiod=14)
+    atr_14 = float(atr_vals_14[-1]) if atr_vals_14 is not None and len(atr_vals_14) > 0 and not np.isnan(atr_vals_14[-1]) else 0.0
+    
+    long_period = 14400
+    if len(rates) < long_period + 1:
+        long_period = len(rates) - 1
+    if long_period >= 2:
+        atr_vals_14400 = talib.ATR(high, low, close, timeperiod=long_period)
+        atr_14400 = float(atr_vals_14400[-1]) if atr_vals_14400 is not None and len(atr_vals_14400) > 0 and not np.isnan(atr_vals_14400[-1]) else 0.0
     else:
-        spread10x = 0.0
-
-    real_atr = max(long_atr, mid_atr, short_atr, spread10x)
-    return real_atr
+        atr_14400 = 0.0
+        
+    max_atr = max(atr_2, atr_3, atr_5, atr_14, atr_14400)
+    
+    rates_latest = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M1, 0, 1)
+    latest_time = int(rates_latest[0]['time']) if rates_latest is not None and len(rates_latest) > 0 else int(time.time())
+    with _atr_cache_lock:
+        _atr_cache[symbol] = {
+            "last_bar_time": latest_time,
+            "max_atr": max_atr,
+            "atr_2": atr_2,
+            "atr_3": atr_3,
+            "atr_5": atr_5,
+            "atr_14": atr_14,
+            "atr_14400": atr_14400
+        }
+    return max_atr
 
 def get_account_settings(login_num):
     """
@@ -692,7 +764,24 @@ class RequestHandler(BaseHTTPRequestHandler):
                         # Fallback to ATR-based default SL if not specified
                         real_atr = calculate_atr(instrument)
                         if real_atr is not None and real_atr > 0:
-                            sl_pips = 2.0 * real_atr
+                            # 1X ATR + spread, floored at DefaultSLPips
+                            tick = mt5.symbol_info_tick(instrument)
+                            spread = (tick.ask - tick.bid) if (tick and tick.ask > 0 and tick.bid > 0) else 0.0
+                            calculated_sl = real_atr + spread
+                            
+                            acc_settings = get_account_settings(account_info.login)
+                            name_conversions = acc_settings.get("NameConversions", {})
+                            global_symbol = instrument
+                            for g_sym, b_sym in name_conversions.items():
+                                if b_sym == instrument:
+                                    global_symbol = g_sym
+                                    break
+                            
+                            global_cfg = get_global_settings()
+                            default_sl_pips = float(global_cfg.get("DefaultSLPips", {}).get(global_symbol, 0.0))
+                            point_value = float(acc_settings.get("DefaultPointValue", {}).get(global_symbol, 0.0001))
+                            
+                            sl_pips = max(calculated_sl, default_sl_pips * point_value)
                         else:
                             sl_pips = 0.0020  # Safe generic fallback
                     vol, err = calculate_risk_based_volume(str(final_risk_perc), str(sl_pips), account_info, symbol_info)
@@ -700,7 +789,24 @@ class RequestHandler(BaseHTTPRequestHandler):
                     if sl_pips <= 0:
                         real_atr = calculate_atr(instrument)
                         if real_atr is not None and real_atr > 0:
-                            sl_pips = 2.0 * real_atr
+                            # 1X ATR + spread, floored at DefaultSLPips
+                            tick = mt5.symbol_info_tick(instrument)
+                            spread = (tick.ask - tick.bid) if (tick and tick.ask > 0 and tick.bid > 0) else 0.0
+                            calculated_sl = real_atr + spread
+                            
+                            acc_settings = get_account_settings(account_info.login)
+                            name_conversions = acc_settings.get("NameConversions", {})
+                            global_symbol = instrument
+                            for g_sym, b_sym in name_conversions.items():
+                                if b_sym == instrument:
+                                    global_symbol = g_sym
+                                    break
+                            
+                            global_cfg = get_global_settings()
+                            default_sl_pips = float(global_cfg.get("DefaultSLPips", {}).get(global_symbol, 0.0))
+                            point_value = float(acc_settings.get("DefaultPointValue", {}).get(global_symbol, 0.0001))
+                            
+                            sl_pips = max(calculated_sl, default_sl_pips * point_value)
                         else:
                             sl_pips = 0.0020  # Safe generic fallback
                     vol, err = normalize_explicit_volume(str(qty_val), symbol_info)
@@ -885,10 +991,15 @@ class RequestHandler(BaseHTTPRequestHandler):
             if atr is None:
                 return self._send_error_response(f"Failed to calculate ATR for {instrument}.", 500)
             
+            # Fetch current spread as well
+            tick = mt5.symbol_info_tick(instrument)
+            spread = (tick.ask - tick.bid) if (tick and tick.ask > 0 and tick.bid > 0) else 0.0
+            
             self._send_json_response({
                 "success": True,
                 "instrument": instrument,
-                "atr": atr
+                "atr": atr,
+                "spread": spread
             })
             
      
@@ -1024,6 +1135,10 @@ def run_server():
         # Start background time-stop monitor thread
         monitor_thread = threading.Thread(target=time_stop_monitor, name="TimeStopMonitor", daemon=True)
         monitor_thread.start()
+        
+        # Start background ATR cache updater thread
+        atr_thread = threading.Thread(target=atr_cache_updater, name="AtrCacheUpdater", daemon=True)
+        atr_thread.start()
         
         server_address = (HOST, PORT)
         server = ThreadingHTTPServer(server_address, RequestHandler)
