@@ -476,7 +476,8 @@ async def websocket_endpoint(websocket: WebSocket):
                         "status": "ok",
                         "data": {
                             "symbols": settings.global_names,
-                            "slpips": settings.default_sl_pips
+                            "slpips": settings.default_sl_pips,
+                            "tp_multiplier": settings.tp_multiplier
                         }
                     }, websocket)
 

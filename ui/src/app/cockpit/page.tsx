@@ -76,6 +76,7 @@ export default function CockpitPanel() {
   const [selectedSymbol, setSelectedSymbol] = useState<string>('');
   const [executionTab, setExecutionTab] = useState<'entry' | 'modify' | 'manage'>('entry');
   const [entryMode, setEntryMode] = useState<'pip_risk' | 'atr_risk' | 'pending'>('pip_risk');
+  const [tpMultiplier, setTpMultiplier] = useState<number>(2.0);
 
   // Pip & %Risk Mode State
   const [slPips, setSlPips] = useState<string>('20.0');
@@ -205,6 +206,7 @@ export default function CockpitPanel() {
             if (data?.symbols) {
               setSymbols(data.symbols);
               if (data.slpips) setDefaultSlPips(data.slpips);
+              if (data.tp_multiplier !== undefined) setTpMultiplier(data.tp_multiplier);
             }
           })
           .catch(err => console.error('Failed to fetch symbols:', err));
@@ -364,8 +366,8 @@ export default function CockpitPanel() {
   }, [selectedSymbol, atrInfo, defaultSlPips]);
 
   const computedDefaultTp = useMemo(() => {
-    return computedDefaultSl * 2.0;
-  }, [computedDefaultSl]);
+    return computedDefaultSl * tpMultiplier;
+  }, [computedDefaultSl, tpMultiplier]);
 
   // Autofill Default SL/TP based on selectedSymbol
   useEffect(() => {
@@ -375,7 +377,7 @@ export default function CockpitPanel() {
       setLimitSlPips(slString);
       
       const slFloat = safeParseFloat(slString);
-      setLimitTpPips((slFloat * 2.0).toString());
+      setLimitTpPips((slFloat * tpMultiplier).toString());
       
       const isIndex = ['SP500', 'DAX40', 'FTSE100', 'NQ100', 'GOLD'].includes(selectedSymbol);
       if (isIndex) {
@@ -384,7 +386,7 @@ export default function CockpitPanel() {
         setLimitSizingMode('risk');
       }
     }
-  }, [selectedSymbol, defaultSlPips]);
+  }, [selectedSymbol, defaultSlPips, tpMultiplier]);
 
   // Fetch ATR on selectedSymbol, entryMode or limitUseDefault changes
   useEffect(() => {
@@ -487,7 +489,7 @@ export default function CockpitPanel() {
 
     if (entryMode === 'pending' && limitUseDefault) {
       finalSl = atrInfo ? Math.round(atrInfo.atr_pips) : (defaultSlPips[selectedSymbol] || 15.0);
-      finalTp = finalSl * 2.0;
+      finalTp = finalSl * tpMultiplier;
       finalRisk = 0;
       finalLots = 0;
     }
@@ -663,7 +665,7 @@ export default function CockpitPanel() {
         setLimitSlPips(value);
         const v = parseFloat(value);
         if (!isNaN(v)) {
-          setLimitTpPips((v * 2.0).toString());
+          setLimitTpPips((v * tpMultiplier).toString());
         }
         break;
       case 'limitTpPips':
@@ -868,7 +870,7 @@ export default function CockpitPanel() {
     entryOffsetBuy, entryOffsetSell, limitSlPips, limitTpPips, limitSizingMode, limitRiskPerc, limitLots, limitUseDefault,
     modifyOffsetBuy, modifyOffsetSell, manageSlEntryPips, manageSlMidPips, manageTpEntryPips, manageTpMidPips,
     cancelConfirm, flattenConfirm,
-    showMicroPanel, microSymbol, microAtrPips, microIsFetchingAtr, microSubmitting, activeDropdown
+    showMicroPanel, microSymbol, microAtrPips, microIsFetchingAtr, microSubmitting, activeDropdown, tpMultiplier
   ]);
 
   // Picture-in-Picture window pop-out logic

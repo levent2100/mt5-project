@@ -142,7 +142,7 @@
                 "Multiplier": 10,
                 "ip_port": "http://127.0.0.1:58802",
                 "ExePath": "C:\\Program Files\\MetaTrader 5_2\\terminal64.exe",
-                "RiskPerc": 10.0,
+                "RiskPerc": 5.0,
                 "IsRiskBased": true,
                 "NameConversions": {
                     "EURUSD": "EURUSD",
@@ -472,7 +472,7 @@
                 "Multiplier": 10,
                 "ip_port": "http://127.0.0.1:58808",
                 "ExePath": "C:\\Program Files\\MetaTrader 5_8\\terminal64.exe",
-                "RiskPerc": 20.0,
+                "RiskPerc": 5.0,
                 "IsRiskBased": true,
                 "NameConversions": {
                     "EURUSD": "EURUSD.r",

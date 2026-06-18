@@ -129,6 +129,7 @@ export default function Dashboard() {
   const [slPips, setSlPips] = useState<string>('');
   const [quantity, setQuantity] = useState<string>('1.0');
   const [isRiskBasedInput, setIsRiskBasedInput] = useState<boolean>(true);
+  const [tpMultiplier, setTpMultiplier] = useState<number>(2.0);
 
   // Upgraded Cockpit Pad States
   const [executionTab, setExecutionTab] = useState<'entry' | 'modify' | 'manage'>('entry');
@@ -251,6 +252,7 @@ export default function Dashboard() {
             if (data?.symbols) {
               setSymbols(data.symbols);
               if (data.slpips) setDefaultSlPips(data.slpips);
+              if (data.tp_multiplier !== undefined) setTpMultiplier(data.tp_multiplier);
               if (data.symbols.length > 0) setSelectedSymbol(data.symbols[0]);
             }
           })
@@ -468,8 +470,8 @@ export default function Dashboard() {
   }, [selectedSymbol, atrInfo, defaultSlPips]);
 
   const computedDefaultTp = useMemo(() => {
-    return computedDefaultSl * 2.0;
-  }, [computedDefaultSl]);
+    return computedDefaultSl * tpMultiplier;
+  }, [computedDefaultSl, tpMultiplier]);
 
   // --- Auto-fill SL pips based on selected symbol ---
   useEffect(() => {
@@ -479,7 +481,7 @@ export default function Dashboard() {
       setLimitSlPips(slString);
       
       const slFloat = safeParseFloat(slString);
-      setLimitTpPips((slFloat * 2.0).toString());
+      setLimitTpPips((slFloat * tpMultiplier).toString());
       
       // Adjust forms for indexes vs currencies
       const isIndex = ['SP500', 'DAX40', 'FTSE100', 'NQ100', 'GOLD'].includes(selectedSymbol);
@@ -490,7 +492,7 @@ export default function Dashboard() {
         setLimitSizingMode('risk');
       }
     }
-  }, [selectedSymbol, defaultSlPips]);
+  }, [selectedSymbol, defaultSlPips, tpMultiplier]);
 
   // --- Dynamic ATR fetcher ---
   useEffect(() => {
@@ -532,7 +534,7 @@ export default function Dashboard() {
 
     if (entryMode === 'pending' && limitUseDefault) {
       finalSl = atrInfo ? Math.round(atrInfo.atr_pips) : (defaultSlPips[selectedSymbol] || 15.0);
-      finalTp = finalSl * 2.0;
+      finalTp = finalSl * tpMultiplier;
       finalRisk = 0;
       finalLots = 0;
     }
@@ -745,6 +747,7 @@ export default function Dashboard() {
     sendRequest('get_global_symbols')
       .then(d => {
         if (d?.symbols) setSymbols(d.symbols);
+        if (d?.tp_multiplier !== undefined) setTpMultiplier(d.tp_multiplier);
       })
       .catch(() => {});
   };
@@ -1383,7 +1386,7 @@ export default function Dashboard() {
                               setLimitSlPips(e.target.value);
                               const v = parseFloat(e.target.value);
                               if (!isNaN(v)) {
-                                setLimitTpPips((v * 2.0).toString());
+                                setLimitTpPips((v * tpMultiplier).toString());
                               }
                             }}
                             placeholder="SL pips"
