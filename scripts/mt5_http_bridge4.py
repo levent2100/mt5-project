@@ -419,25 +419,26 @@ def atr_cache_updater():
                 low = np.array([float(bar['low']) for bar in rates], dtype=np.float64)
                 close = np.array([float(bar['close']) for bar in rates], dtype=np.float64)
                 
+                # Calculate using Wilder's ATR (talib.ATR)
                 atr_vals_2 = talib.ATR(high, low, close, timeperiod=2)
-                atr_2 = float(atr_vals_2[-1]) if atr_vals_2 is not None and len(atr_vals_2) > 0 and not np.isnan(atr_vals_2[-1]) else 0.0
+                atr_2 = float(atr_vals_2[-2]) if atr_vals_2 is not None and len(atr_vals_2) > 1 and not np.isnan(atr_vals_2[-2]) else 0.0
                 
                 atr_vals_3 = talib.ATR(high, low, close, timeperiod=3)
-                atr_3 = float(atr_vals_3[-1]) if atr_vals_3 is not None and len(atr_vals_3) > 0 and not np.isnan(atr_vals_3[-1]) else 0.0
+                atr_3 = float(atr_vals_3[-2]) if atr_vals_3 is not None and len(atr_vals_3) > 1 and not np.isnan(atr_vals_3[-2]) else 0.0
                 
                 atr_vals_5 = talib.ATR(high, low, close, timeperiod=5)
-                atr_5 = float(atr_vals_5[-1]) if atr_vals_5 is not None and len(atr_vals_5) > 0 and not np.isnan(atr_vals_5[-1]) else 0.0
+                atr_5 = float(atr_vals_5[-2]) if atr_vals_5 is not None and len(atr_vals_5) > 1 and not np.isnan(atr_vals_5[-2]) else 0.0
                 
                 atr_vals_14 = talib.ATR(high, low, close, timeperiod=14)
-                atr_14 = float(atr_vals_14[-1]) if atr_vals_14 is not None and len(atr_vals_14) > 0 and not np.isnan(atr_vals_14[-1]) else 0.0
+                atr_14 = float(atr_vals_14[-2]) if atr_vals_14 is not None and len(atr_vals_14) > 1 and not np.isnan(atr_vals_14[-2]) else 0.0
                 
                 long_period = 14400
-                if len(rates) < long_period + 1:
-                    long_period = len(rates) - 1
+                if len(rates) < long_period + 2:
+                    long_period = len(rates) - 2
                 
                 if long_period >= 2:
                     atr_vals_14400 = talib.ATR(high, low, close, timeperiod=long_period)
-                    atr_14400 = float(atr_vals_14400[-1]) if atr_vals_14400 is not None and len(atr_vals_14400) > 0 and not np.isnan(atr_vals_14400[-1]) else 0.0
+                    atr_14400 = float(atr_vals_14400[-2]) if atr_vals_14400 is not None and len(atr_vals_14400) > 1 and not np.isnan(atr_vals_14400[-2]) else 0.0
                 else:
                     atr_14400 = 0.0
                 
@@ -471,24 +472,25 @@ def calculate_atr(symbol, period=14):
     low = np.array([float(bar['low']) for bar in rates], dtype=np.float64)
     close = np.array([float(bar['close']) for bar in rates], dtype=np.float64)
     
+    # Calculate using Wilder's ATR (talib.ATR)
     atr_vals_2 = talib.ATR(high, low, close, timeperiod=2)
-    atr_2 = float(atr_vals_2[-1]) if atr_vals_2 is not None and len(atr_vals_2) > 0 and not np.isnan(atr_vals_2[-1]) else 0.0
+    atr_2 = float(atr_vals_2[-2]) if atr_vals_2 is not None and len(atr_vals_2) > 1 and not np.isnan(atr_vals_2[-2]) else 0.0
     
     atr_vals_3 = talib.ATR(high, low, close, timeperiod=3)
-    atr_3 = float(atr_vals_3[-1]) if atr_vals_3 is not None and len(atr_vals_3) > 0 and not np.isnan(atr_vals_3[-1]) else 0.0
+    atr_3 = float(atr_vals_3[-2]) if atr_vals_3 is not None and len(atr_vals_3) > 1 and not np.isnan(atr_vals_3[-2]) else 0.0
     
     atr_vals_5 = talib.ATR(high, low, close, timeperiod=5)
-    atr_5 = float(atr_vals_5[-1]) if atr_vals_5 is not None and len(atr_vals_5) > 0 and not np.isnan(atr_vals_5[-1]) else 0.0
+    atr_5 = float(atr_vals_5[-2]) if atr_vals_5 is not None and len(atr_vals_5) > 1 and not np.isnan(atr_vals_5[-2]) else 0.0
     
     atr_vals_14 = talib.ATR(high, low, close, timeperiod=14)
-    atr_14 = float(atr_vals_14[-1]) if atr_vals_14 is not None and len(atr_vals_14) > 0 and not np.isnan(atr_vals_14[-1]) else 0.0
+    atr_14 = float(atr_vals_14[-2]) if atr_vals_14 is not None and len(atr_vals_14) > 1 and not np.isnan(atr_vals_14[-2]) else 0.0
     
     long_period = 14400
-    if len(rates) < long_period + 1:
-        long_period = len(rates) - 1
+    if len(rates) < long_period + 2:
+        long_period = len(rates) - 2
     if long_period >= 2:
         atr_vals_14400 = talib.ATR(high, low, close, timeperiod=long_period)
-        atr_14400 = float(atr_vals_14400[-1]) if atr_vals_14400 is not None and len(atr_vals_14400) > 0 and not np.isnan(atr_vals_14400[-1]) else 0.0
+        atr_14400 = float(atr_vals_14400[-2]) if atr_vals_14400 is not None and len(atr_vals_14400) > 1 and not np.isnan(atr_vals_14400[-2]) else 0.0
     else:
         atr_14400 = 0.0
         
@@ -678,7 +680,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                 "modify_order": self.handle_modify_order, 
                 "cancel_order": self.handle_cancel_order, 
                 "manage_position_stops": self.handle_manage_position_stops,
-                "getatr": self.handle_get_atr
+                "getatr": self.handle_get_atr,
+                "getallatrs": self.handle_get_all_atrs
             }
             handler = handlers.get(command)
 
@@ -1004,6 +1007,29 @@ class RequestHandler(BaseHTTPRequestHandler):
                 "instrument": instrument,
                 "atr": atr,
                 "spread": spread
+            })
+            
+    def handle_get_all_atrs(self, data):
+        if not mt5_manager.ensure_connection(): return self._send_error_response("Failed to connect to MetaTrader 5.", 503)
+        with mt5_manager.lock:
+            instruments = data.get("instruments", [])
+            results = {}
+            for instrument in instruments:
+                symbol_info = ensure_symbol_selected(instrument)
+                if not symbol_info:
+                    continue
+                atr = calculate_atr(instrument)
+                if atr is None:
+                    continue
+                tick = mt5.symbol_info_tick(instrument)
+                spread = (tick.ask - tick.bid) if (tick and tick.ask > 0 and tick.bid > 0) else 0.0
+                results[instrument] = {
+                    "atr": atr,
+                    "spread": spread
+                }
+            self._send_json_response({
+                "success": True,
+                "results": results
             })
             
      

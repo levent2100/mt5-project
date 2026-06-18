@@ -5,7 +5,7 @@ from typing import Dict, Any, List, Optional
 logger = logging.getLogger("backend.bridge")
 
 class BridgeClient:
-    def __init__(self, base_url: str, timeout: float = 1.0):
+    def __init__(self, base_url: str, timeout: float = 3.0):
         # Ensure base_url has no trailing slash
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
@@ -62,6 +62,10 @@ class BridgeClient:
     async def get_spreads(self, instruments: List[str]) -> Dict[str, Any]:
         """Fetch active bid/ask spreads for a list of global instruments."""
         return await self._post("getspreads", {"instruments": instruments})
+
+    async def get_all_atrs(self, instruments: List[str]) -> Dict[str, Any]:
+        """Fetch active ATR and spread for a list of global instruments."""
+        return await self._post("getallatrs", {"instruments": instruments})
 
     async def execute_trade(self, trades: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Execute a market or pending order on this bridge."""

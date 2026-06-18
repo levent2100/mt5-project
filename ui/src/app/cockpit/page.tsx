@@ -434,7 +434,7 @@ export default function CockpitPanel() {
     if (microAtrPips === null || microAtrPips <= 0) return showStatus('Wait for Micro ATR to resolve', 'warning');
 
     setMicroSubmitting(true);
-    const calculatedSl = Math.round(microAtrPips);
+    const calculatedSl = parseFloat(microAtrPips.toFixed(2));
     showStatus(`Placing scaled-risk ${direction.toUpperCase()} (Micro Pad)...`, 'info', 1500);
 
     try {
@@ -2155,7 +2155,7 @@ export default function CockpitPanel() {
                     <span className="w-8 h-3.5 bg-neutral-200 dark:bg-neutral-850 rounded animate-pulse" />
                   ) : microAtrPips !== null ? (
                     <span className="text-neutral-700 dark:text-neutral-200 font-extrabold">
-                      {Math.round(microAtrPips)} <span className="text-[8.5px] font-normal opacity-60">pips</span>
+                      {microAtrPips.toFixed(2)} <span className="text-[8.5px] font-normal opacity-60">pips</span>
                     </span>
                   ) : (
                     <span className="opacity-50">N/A</span>

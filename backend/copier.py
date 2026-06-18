@@ -81,6 +81,68 @@ class TradeCopier:
             }
         return {"success": False, "error": res.get("error", "Failed to fetch ATR from bridge")}
 
+    async def get_all_atrs(self, symbols_global: List[str]) -> Dict[str, Dict[str, Any]]:
+        """Fetch ATR and spread for a list of global symbols in a single request from the reference account's bridge."""
+        ref_acc = self.get_reference_account()
+        if not ref_acc:
+            return {}
+        
+        ip_port = ref_acc.get("ip_port")
+        if not ip_port:
+            return {}
+        
+        name_conversions = ref_acc.get("NameConversions", {})
+        # Map global symbols to broker symbols
+        broker_to_global = {}
+        instruments_broker = []
+        for sym_g in symbols_global:
+            sym_b = name_conversions.get(sym_g, sym_g)
+            if sym_b and sym_b != "N/A":
+                instruments_broker.append(sym_b)
+                broker_to_global[sym_b] = sym_g
+                
+        if not instruments_broker:
+            return {}
+            
+        client = BridgeClient(ip_port)
+        res = await client.get_all_atrs(instruments_broker)
+        results_mapped = {}
+        
+        if res.get("success", False):
+            results = res.get("results", {})
+            settings.load()
+            point_value_dict = ref_acc.get("DefaultPointValue", {})
+            default_sl_dict = settings.default_sl_pips
+            
+            for sym_b, info in results.items():
+                sym_g = broker_to_global.get(sym_b)
+                if not sym_g:
+                    continue
+                
+                raw_atr = float(info.get("atr", 0.0))
+                raw_spread = float(info.get("spread", 0.0))
+                
+                point_value = float(point_value_dict.get(sym_g, 0.0001))
+                atr_pips = raw_atr / point_value if point_value > 0 else raw_atr
+                spread_pips = raw_spread / point_value if point_value > 0 else raw_spread
+                
+                calculated_sl = settings.sl_atr_multiplier * atr_pips + spread_pips
+                
+                default_sl = float(default_sl_dict.get(sym_g, 0.0))
+                final_sl_pips = calculated_sl
+                if default_sl > 0:
+                    if final_sl_pips < default_sl:
+                        final_sl_pips = default_sl
+                        
+                results_mapped[sym_g] = {
+                    "success": True,
+                    "instrument": sym_g,
+                    "atr_raw": final_sl_pips * point_value,
+                    "atr_pips": final_sl_pips
+                }
+        return results_mapped
+
+
     async def copy_trade(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
         Distribute a trade request from UI to all active accounts, scaling by their DefaultPointValue.

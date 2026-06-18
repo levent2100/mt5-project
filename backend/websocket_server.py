@@ -369,7 +369,7 @@ async def poll_spreads():
         await asyncio.sleep(1.0)
 
 async def poll_atr():
-    """Polls live ATR for all active/configured symbols concurrently and broadcasts updates every second."""
+    """Polls live ATR for all active/configured symbols concurrently using get_all_atrs and broadcasts updates every second."""
     while True:
         try:
             # Only poll if there are active subscribers to "atr" channel
@@ -377,12 +377,12 @@ async def poll_atr():
                 settings.load()
                 symbols = settings.global_names
                 
-                # Fetch ATR for all symbols concurrently using copier.get_atr
-                tasks = [copier.get_atr(sym) for sym in symbols]
-                results = await asyncio.gather(*tasks, return_exceptions=True)
+                # Fetch ATR for all symbols in a single bridge request
+                results = await copier.get_all_atrs(symbols)
                 
                 mapped_atr = {}
-                for sym, res in zip(symbols, results):
+                for sym in symbols:
+                    res = results.get(sym)
                     if isinstance(res, dict) and res.get("success"):
                         mapped_atr[sym] = {
                             "atr_raw": res.get("atr_raw"),

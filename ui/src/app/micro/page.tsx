@@ -257,7 +257,7 @@ export default function MicroPanel() {
     if (atrPips === null || atrPips <= 0) return showStatus("Wait for ATR to resolve", "warning");
 
     setIsSubmitting(true);
-    const calculatedSl = Math.round(atrPips);
+    const calculatedSl = parseFloat(atrPips.toFixed(2));
 
     showStatus(`Placing scaled-risk ${direction.toUpperCase()}...`, "info", 1500);
 
@@ -457,7 +457,7 @@ export default function MicroPanel() {
                 <span className="w-10 h-3.5 bg-neutral-150 rounded animate-pulse" />
               ) : atrPips !== null ? (
                 <span className="font-bold text-neutral-700">
-                  {Math.round(atrPips)} <span className="text-[9px] text-neutral-400 font-normal">pips</span>
+                  {atrPips.toFixed(2)} <span className="text-[9px] text-neutral-400 font-normal">pips</span>
                 </span>
               ) : (
                 <span className="text-neutral-400">N/A</span>
