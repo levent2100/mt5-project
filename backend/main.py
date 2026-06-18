@@ -10,6 +10,9 @@ logging.basicConfig(
     format="[%(asctime)s][%(levelname)s][%(name)s] %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S"
 )
+# Silence httpx logging to warning-only
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
 logger = logging.getLogger("backend.main")
 
 app = FastAPI(

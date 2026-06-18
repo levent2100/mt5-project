@@ -109,9 +109,7 @@ export default function CockpitPanel() {
   const [manageTpEntryPips, setManageTpEntryPips] = useState<string>('20.0');
   const [manageTpMidPips, setManageTpMidPips] = useState<string>('10.0');
 
-  // Confirmation States (Double-click / state-based safety)
-  const [cancelConfirm, setCancelConfirm] = useState<boolean>(false);
-  const [flattenConfirm, setFlattenConfirm] = useState<boolean>(false);
+
 
   // Micro Pad States
   const [showMicroPanel, setShowMicroPanel] = useState<boolean>(false);
@@ -559,13 +557,6 @@ export default function CockpitPanel() {
 
   const handleCancelSelectedOrder = () => {
     if (!selectedSymbol) return showStatus('Select a symbol first!', 'warning');
-    if (!cancelConfirm) {
-      setCancelConfirm(true);
-      showStatus('Click again to CONFIRM cancelling working order', 'warning', 3000);
-      setTimeout(() => setCancelConfirm(false), 3000);
-      return;
-    }
-    setCancelConfirm(false);
     showStatus(`Cancelling pending order for ${selectedSymbol}...`, 'info');
     sendRequest('cancel_order', { symbol: selectedSymbol })
       .then(res => showStatus(res?.message || 'Order cancelled successfully.', 'success'))
@@ -574,13 +565,6 @@ export default function CockpitPanel() {
 
   const handleFlattenPosition = () => {
     if (!selectedSymbol) return showStatus('Select a symbol first!', 'warning');
-    if (!flattenConfirm) {
-      setFlattenConfirm(true);
-      showStatus('Click again to CONFIRM flattening position', 'warning', 3000);
-      setTimeout(() => setFlattenConfirm(false), 3000);
-      return;
-    }
-    setFlattenConfirm(false);
     showStatus(`Flattening ${selectedSymbol} positions...`, 'info');
     sendRequest('flatten', { instrument: selectedSymbol })
       .then(res => showStatus(res?.message || 'Positions closed successfully.', 'success'))
@@ -830,6 +814,14 @@ export default function CockpitPanel() {
     }
   };
 
+  const handleNativeClickRef = useRef(handleNativeClick);
+  const handleNativeInputRef = useRef(handleNativeInput);
+
+  useEffect(() => {
+    handleNativeClickRef.current = handleNativeClick;
+    handleNativeInputRef.current = handleNativeInput;
+  });
+
   // Attach native handlers directly to intercept events inside Document Picture-in-Picture window
   useEffect(() => {
     const container = containerRef.current;
@@ -841,7 +833,7 @@ export default function CockpitPanel() {
       if (actionBtn) {
         const action = actionBtn.getAttribute('data-action');
         const val = actionBtn.getAttribute('data-value');
-        if (action) handleNativeClick(action, val);
+        if (action) handleNativeClickRef.current(action, val);
       } else {
         setActiveDropdown(null);
       }
@@ -851,7 +843,7 @@ export default function CockpitPanel() {
       const target = e.target as HTMLInputElement | HTMLSelectElement;
       const field = target.getAttribute('data-field');
       if (field) {
-        handleNativeInput(field, target.value);
+        handleNativeInputRef.current(field, target.value);
       }
     };
 
@@ -864,14 +856,7 @@ export default function CockpitPanel() {
       container.removeEventListener('input', handleInput);
       container.removeEventListener('change', handleInput);
     };
-  }, [
-    symbols, selectedSymbol, wsStatus, theme, executionTab, entryMode,
-    slPips, customRisk, atrMultiplier, atrRiskPerc, atrInfo,
-    entryOffsetBuy, entryOffsetSell, limitSlPips, limitTpPips, limitSizingMode, limitRiskPerc, limitLots, limitUseDefault,
-    modifyOffsetBuy, modifyOffsetSell, manageSlEntryPips, manageSlMidPips, manageTpEntryPips, manageTpMidPips,
-    cancelConfirm, flattenConfirm,
-    showMicroPanel, microSymbol, microAtrPips, microIsFetchingAtr, microSubmitting, activeDropdown, tpMultiplier
-  ]);
+  }, [isMounted]);
 
   // Picture-in-Picture window pop-out logic
   const popOutPanel = async () => {
@@ -1736,14 +1721,10 @@ export default function CockpitPanel() {
                   {/* Cancel working order button */}
                   <button
                     data-action="cancel-order"
-                    className={`w-full py-2.5 rounded-lg border text-[10.5px] font-bold tracking-wider transition-all flex items-center justify-center gap-2 active:scale-95 mt-1.5 ${
-                      cancelConfirm 
-                        ? 'bg-rose-950/40 border-rose-500 text-rose-400 animate-pulse' 
-                        : 'border-rose-900/40 hover:bg-rose-950/20 text-rose-500 dark:text-rose-400'
-                    }`}
+                    className="w-full py-2.5 rounded-lg border text-[10.5px] font-bold tracking-wider transition-all flex items-center justify-center gap-2 active:scale-95 mt-1.5 border-rose-900/40 hover:bg-rose-950/20 text-rose-500 dark:text-rose-400"
                   >
                     <XOctagon size={13} />
-                    {cancelConfirm ? 'CONFIRM ORDER CANCEL' : 'CANCEL WORKING ORDER'}
+                    CANCEL WORKING ORDER
                   </button>
                 </div>
               ) : (
@@ -1824,14 +1805,10 @@ export default function CockpitPanel() {
                   {/* Flatten MKT button */}
                   <button
                     data-action="flatten-position"
-                    className={`w-full py-2.5 rounded-lg text-[10.5px] font-extrabold tracking-wider transition-all flex items-center justify-center gap-2 active:scale-95 shadow-sm ${
-                      flattenConfirm 
-                        ? 'bg-rose-700 text-white animate-pulse' 
-                        : 'bg-rose-600 hover:bg-rose-500 text-white'
-                    }`}
+                    className="w-full py-2.5 rounded-lg text-[10.5px] font-extrabold tracking-wider transition-all flex items-center justify-center gap-2 active:scale-95 shadow-sm bg-rose-600 hover:bg-rose-500 text-white"
                   >
                     <XOctagon size={13} />
-                    {flattenConfirm ? 'CONFIRM FLATTEN MKT' : 'FLATTEN POSITION MKT'}
+                    FLATTEN POSITION MKT
                   </button>
 
                   {/* Stop Loss update options */}

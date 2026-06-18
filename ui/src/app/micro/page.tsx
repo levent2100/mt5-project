@@ -293,6 +293,16 @@ export default function MicroPanel() {
     }
   };
 
+  const handleTradeActionRef = useRef(handleTradeAction);
+  const handleFlattenActionRef = useRef(handleFlattenAction);
+  const setSelectedSymbolRef = useRef(setSelectedSymbol);
+
+  useEffect(() => {
+    handleTradeActionRef.current = handleTradeAction;
+    handleFlattenActionRef.current = handleFlattenAction;
+    setSelectedSymbolRef.current = setSelectedSymbol;
+  });
+
   // Listen to native events directly on DOM elements. This guarantees React state propagates
   // correctly even after the DOM elements are physically re-parented into a Picture-in-Picture window.
   useEffect(() => {
@@ -303,19 +313,19 @@ export default function MicroPanel() {
 
     const handleSelectChange = (e: Event) => {
       const target = e.target as HTMLSelectElement;
-      setSelectedSymbol(target.value);
+      setSelectedSymbolRef.current(target.value);
     };
 
     const handleBuyClick = () => {
-      handleTradeAction("buy");
+      handleTradeActionRef.current("buy");
     };
 
     const handleSellClick = () => {
-      handleTradeAction("sell");
+      handleTradeActionRef.current("sell");
     };
 
     const handleFlattenClick = () => {
-      handleFlattenAction();
+      handleFlattenActionRef.current();
     };
 
     if (selectEl) selectEl.addEventListener("change", handleSelectChange);
@@ -329,7 +339,7 @@ export default function MicroPanel() {
       if (sellEl) sellEl.removeEventListener("click", handleSellClick);
       if (flattenEl) flattenEl.removeEventListener("click", handleFlattenClick);
     };
-  }, [symbols, selectedSymbol, wsStatus, isSubmitting, atrPips]);
+  }, []);
 
   // Document Picture-in-Picture Pop-out
   const popOutPanel = async () => {

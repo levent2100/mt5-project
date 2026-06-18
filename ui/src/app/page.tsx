@@ -69,6 +69,12 @@ interface LogEntry {
   message: string;
   source: string;
   type: 'info' | 'trade' | 'error' | 'warning';
+  details?: Array<{
+    account: string;
+    success: boolean;
+    error?: string | null;
+    message?: string | null;
+  }>;
 }
 
 interface SpreadAccount {
@@ -123,6 +129,7 @@ export default function Dashboard() {
   const [spreadPulses, setSpreadPulses] = useState<Record<string, boolean>>({});
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [logFilter, setLogFilter] = useState<'all' | 'info' | 'trade' | 'error'>('all');
+  const [expandedLogIndices, setExpandedLogIndices] = useState<Record<number, boolean>>({});
   
   // Interactive Trading Form States
   const [selectedSymbol, setSelectedSymbol] = useState<string>('');
@@ -206,12 +213,13 @@ export default function Dashboard() {
   };
 
   // --- Helper: Local Logger ---
-  const addLog = (message: string, source = 'UI', type: LogEntry['type'] = 'info') => {
+  const addLog = (message: string, source = 'UI', type: LogEntry['type'] = 'info', details?: LogEntry['details']) => {
     const entry: LogEntry = {
       timestamp: new Date().toLocaleTimeString(),
       message,
       source,
-      type
+      type,
+      details
     };
     setLogs(prev => [entry, ...prev].slice(0, 150));
   };
@@ -360,7 +368,8 @@ export default function Dashboard() {
                   addLog(
                     payload.data.message, 
                     payload.data.source || 'Server', 
-                    payload.data.type || 'info'
+                    payload.data.type || 'info',
+                    payload.data.details
                   );
                 }
                 break;
@@ -617,38 +626,20 @@ export default function Dashboard() {
   const handleCancelSelectedOrder = () => {
     if (!selectedSymbol) return triggerAlert('Select a symbol first!', 'warning');
     
-    setConfirmModal({
-      isOpen: true,
-      title: 'Cancel Pending Order',
-      message: `Are you sure you want to cancel the working pending order for ${selectedSymbol} across all accounts?`,
-      isDanger: true,
-      action: () => {
-        triggerAlert(`Cancelling pending order for ${selectedSymbol}...`, 'info');
-        sendRequest('cancel_order', { symbol: selectedSymbol })
-          .then(res => triggerAlert(res?.message || 'Order cancelled successfully.', 'success'))
-          .catch(err => triggerAlert(`Cancellation failed: ${err}`, 'danger'));
-        setConfirmModal(prev => ({ ...prev, isOpen: false }));
-      }
-    });
+    triggerAlert(`Cancelling pending order for ${selectedSymbol}...`, 'info');
+    sendRequest('cancel_order', { symbol: selectedSymbol })
+      .then(res => triggerAlert(res?.message || 'Order cancelled successfully.', 'success'))
+      .catch(err => triggerAlert(`Cancellation failed: ${err}`, 'danger'));
   };
 
   const handleManagePosition = (type: 'breakeven' | 'flatten' | 'sl_entry' | 'sl_mid' | 'tp_entry' | 'tp_mid') => {
     if (!selectedSymbol) return triggerAlert('Select a symbol first!', 'warning');
 
     if (type === 'flatten') {
-      setConfirmModal({
-        isOpen: true,
-        title: 'Flatten Position',
-        message: `Are you sure you want to close ALL active positions for ${selectedSymbol} at Market across all accounts?`,
-        isDanger: true,
-        action: () => {
-          triggerAlert(`Flattening ${selectedSymbol} positions...`, 'info');
-          sendRequest('flatten', { instrument: selectedSymbol })
-            .then(res => triggerAlert(res?.message || 'Positions closed successfully.', 'success'))
-            .catch(err => triggerAlert(`Flatten failed: ${err}`, 'danger'));
-          setConfirmModal(prev => ({ ...prev, isOpen: false }));
-        }
-      });
+      triggerAlert(`Flattening ${selectedSymbol} positions...`, 'info');
+      sendRequest('flatten', { instrument: selectedSymbol })
+        .then(res => triggerAlert(res?.message || 'Positions closed successfully.', 'success'))
+        .catch(err => triggerAlert(`Flatten failed: ${err}`, 'danger'));
       return;
     }
 
@@ -690,50 +681,24 @@ export default function Dashboard() {
   const handleFlattenSymbol = () => {
     if (!selectedSymbol) return triggerAlert('Select a symbol to flatten!', 'warning');
     
-    setConfirmModal({
-      isOpen: true,
-      title: 'Flatten Symbol Positions',
-      message: `Are you sure you want to close ALL positions and cancel pending orders for ${selectedSymbol} across all trade-enabled terminals?`,
-      isDanger: true,
-      action: () => {
-        triggerAlert(`Flattening ${selectedSymbol}...`, 'info');
-        sendRequest('flatten', { instrument: selectedSymbol })
-          .then(res => triggerAlert(res?.message || 'Symbol flattened.', 'success'))
-          .catch(err => triggerAlert(`Flatten failed: ${err}`, 'danger'));
-        setConfirmModal(prev => ({ ...prev, isOpen: false }));
-      }
-    });
+    triggerAlert(`Flattening ${selectedSymbol}...`, 'info');
+    sendRequest('flatten', { instrument: selectedSymbol })
+      .then(res => triggerAlert(res?.message || 'Symbol flattened.', 'success'))
+      .catch(err => triggerAlert(`Flatten failed: ${err}`, 'danger'));
   };
 
   const handleCancelAllPending = () => {
-    setConfirmModal({
-      isOpen: true,
-      title: 'Cancel Pending Orders',
-      message: 'Are you sure you want to cancel ALL pending orders across all active accounts?',
-      action: () => {
-        triggerAlert('Cancelling all pending orders...', 'info');
-        sendRequest('cancel', {})
-          .then(res => triggerAlert(res?.message || 'All pending orders cancelled.', 'success'))
-          .catch(err => triggerAlert(`Cancel failed: ${err}`, 'danger'));
-        setConfirmModal(prev => ({ ...prev, isOpen: false }));
-      }
-    });
+    triggerAlert('Cancelling all pending orders...', 'info');
+    sendRequest('cancel', {})
+      .then(res => triggerAlert(res?.message || 'All pending orders cancelled.', 'success'))
+      .catch(err => triggerAlert(`Cancel failed: ${err}`, 'danger'));
   };
 
   const handleFlattenEverything = () => {
-    setConfirmModal({
-      isOpen: true,
-      title: 'DANGER: FLATTEN EVERYTHING',
-      message: 'CRITICAL ACTION: This will immediately close ALL open positions and cancel ALL pending orders across all managed MT5 accounts. This cannot be undone!',
-      isDanger: true,
-      action: () => {
-        triggerAlert('Flushing entire farm portfolio...', 'warning');
-        sendRequest('flatten', {})
-          .then(res => triggerAlert(res?.message || 'Farm fully flattened!', 'success'))
-          .catch(err => triggerAlert(`Full flatten failed: ${err}`, 'danger'));
-        setConfirmModal(prev => ({ ...prev, isOpen: false }));
-      }
-    });
+    triggerAlert('Flushing entire farm portfolio...', 'warning');
+    sendRequest('flatten', {})
+      .then(res => triggerAlert(res?.message || 'Farm fully flattened!', 'success'))
+      .catch(err => triggerAlert(`Full flatten failed: ${err}`, 'danger'));
   };
 
   const handleManualRefresh = () => {
@@ -869,6 +834,21 @@ export default function Dashboard() {
             <span className={`text-[10px] ${theme === 'dark' ? 'text-neutral-500' : 'text-neutral-450'}`}>
               Sync: <span className={`font-mono font-semibold ${theme === 'dark' ? 'text-neutral-300' : 'text-neutral-700'}`}>{lastUpdated}</span>
             </span>
+            {/* Console Logs Page Link */}
+            <a
+              href="/logs"
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`px-3 py-2 rounded-lg border transition-all active:scale-95 flex items-center justify-center gap-1.5 ${
+                theme === 'dark'
+                  ? 'bg-neutral-900/80 border-neutral-850 text-neutral-400 hover:text-neutral-100 hover:border-neutral-700'
+                  : 'bg-neutral-100 border-neutral-250 text-neutral-600 hover:text-neutral-900 hover:border-neutral-450'
+              }`}
+              title="Open Server & Account Logs"
+            >
+              <span className="text-[10px] font-extrabold tracking-wider uppercase">Console Logs</span>
+            </a>
+
             <button 
               onClick={handleManualRefresh} 
               className={`p-2 rounded-lg border active:scale-95 transition-all ${
@@ -2579,7 +2559,7 @@ export default function Dashboard() {
                   </button>
                 ))}
                 <button
-                  onClick={() => setLogs([])}
+                  onClick={() => { setLogs([]); setExpandedLogIndices({}); }}
                   className="px-1.5 py-0.5 rounded-md text-[8px] text-rose-500 hover:opacity-75 transition-all font-bold"
                 >
                   CLEAR
@@ -2591,25 +2571,54 @@ export default function Dashboard() {
             <div className="flex-grow overflow-y-auto font-mono text-[10px] flex flex-col gap-1 pr-2">
               {filteredLogs.length > 0 ? (
                 filteredLogs.map((log, idx) => (
-                  <div key={idx} className="flex gap-2 items-start py-0.2 leading-relaxed">
-                    <span className={`select-none text-[9px] ${
-                      theme === 'dark' ? 'text-neutral-600' : 'text-neutral-400'
-                    }`}>{log.timestamp}</span>
-                    <span className={`px-1.5 py-0.2 border rounded-[3px] text-[8px] uppercase font-extrabold flex-shrink-0 ${
-                      theme === 'dark' 
-                        ? 'bg-neutral-900 text-neutral-450 border-neutral-800' 
-                        : 'bg-neutral-200 text-neutral-600 border-neutral-300'
-                    }`}>
-                      {log.source}
-                    </span>
-                    <span className={
-                      log.type === 'error' ? 'text-rose-500 font-semibold' :
-                      log.type === 'warning' ? 'text-amber-500 font-medium' :
-                      log.type === 'trade' ? 'text-emerald-500 font-bold' :
-                      (theme === 'dark' ? 'text-neutral-300' : 'text-neutral-700')
-                    }>
-                      {log.message}
-                    </span>
+                  <div key={idx} className="flex flex-col gap-0.5 border-b border-neutral-100/5 dark:border-neutral-900/50 pb-1">
+                    <div className="flex gap-2 items-start py-0.2 leading-relaxed">
+                      <span className={`select-none text-[9px] ${
+                        theme === 'dark' ? 'text-neutral-600' : 'text-neutral-400'
+                      }`}>{log.timestamp}</span>
+                      <span className={`px-1.5 py-0.2 border rounded-[3px] text-[8px] uppercase font-extrabold flex-shrink-0 ${
+                        theme === 'dark' 
+                          ? 'bg-neutral-900 text-neutral-450 border-neutral-800' 
+                          : 'bg-neutral-200 text-neutral-600 border-neutral-300'
+                      }`}>
+                        {log.source}
+                      </span>
+                      <span className={
+                        log.type === 'error' ? 'text-rose-500 font-semibold' :
+                        log.type === 'warning' ? 'text-amber-500 font-medium' :
+                        log.type === 'trade' ? 'text-emerald-500 font-bold' :
+                        (theme === 'dark' ? 'text-neutral-300' : 'text-neutral-700')
+                      }>
+                        {log.message}
+                      </span>
+                      {log.details && log.details.length > 0 && (
+                        <button 
+                          onClick={() => setExpandedLogIndices(prev => ({ ...prev, [idx]: !prev[idx] }))}
+                          className={`px-1 rounded text-[8px] transition-all flex items-center gap-0.5 font-semibold ${
+                            theme === 'dark' 
+                              ? 'bg-neutral-850 hover:bg-neutral-800 text-neutral-400 hover:text-white border border-neutral-800' 
+                              : 'bg-neutral-100 hover:bg-neutral-200 text-neutral-650 hover:text-black border border-neutral-300'
+                          }`}
+                        >
+                          {expandedLogIndices[idx] ? 'HIDE DETAILS' : 'SHOW DETAILS'}
+                        </button>
+                      )}
+                    </div>
+                    {expandedLogIndices[idx] && log.details && (
+                      <div className={`ml-14 pl-4 flex flex-col gap-1 border-l-2 ${
+                        theme === 'dark' ? 'border-neutral-850 text-neutral-400' : 'border-neutral-200 text-neutral-600'
+                      }`}>
+                        {log.details.map((detail, dIdx) => (
+                          <div key={dIdx} className="flex gap-2 items-center text-[9px]">
+                            <span className={`w-1.5 h-1.5 rounded-full ${detail.success ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                            <span className="font-bold">{detail.account}:</span>
+                            <span className={detail.success ? 'text-emerald-500 font-semibold' : 'text-rose-500'}>
+                              {detail.success ? 'Success' : `Failed (${detail.error || detail.message || 'Unknown error'})`}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))
               ) : (

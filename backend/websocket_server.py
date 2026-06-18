@@ -17,7 +17,7 @@ router = APIRouter()
 activity_logs: List[Dict[str, Any]] = []
 logs_lock = asyncio.Lock()
 
-async def log_activity(message: str, source: str = "Backend", log_type: str = "info"):
+async def log_activity(message: str, source: str = "Backend", log_type: str = "info", details: Optional[List[Dict[str, Any]]] = None):
     """Adds a log entry and broadcasts it to all log-subscribed clients."""
     entry = {
         "timestamp": datetime.now().strftime("%H:%M:%S"),
@@ -25,6 +25,8 @@ async def log_activity(message: str, source: str = "Backend", log_type: str = "i
         "source": source,
         "type": log_type
     }
+    if details is not None:
+        entry["details"] = details
     async with logs_lock:
         activity_logs.append(entry)
         if len(activity_logs) > 300:
@@ -517,12 +519,12 @@ async def websocket_endpoint(websocket: WebSocket):
                     
                     status = "ok" if res.get("success") else "error"
                     log_type = "trade" if res.get("success") else "error"
-                    await log_activity(res.get("message"), source="Copier", log_type=log_type)
+                    await log_activity(res.get("message"), source="Copier", log_type=log_type, details=res.get("details"))
                     
                     await manager.send_personal_message({
                         "requestId": req_id,
                         "status": status,
-                        "data": {"message": res.get("message")},
+                        "data": {"message": res.get("message"), "details": res.get("details")},
                         "error": None if res.get("success") else res.get("message")
                     }, websocket)
 
@@ -534,12 +536,12 @@ async def websocket_endpoint(websocket: WebSocket):
                     res = await copier.copy_flatten(payload)
                     
                     status = "ok" if res.get("success") else "error"
-                    await log_activity(res.get("message"), source="Copier", log_type="info" if res.get("success") else "error")
+                    await log_activity(res.get("message"), source="Copier", log_type="info" if res.get("success") else "error", details=res.get("details"))
                     
                     await manager.send_personal_message({
                         "requestId": req_id,
                         "status": status,
-                        "data": {"message": res.get("message")},
+                        "data": {"message": res.get("message"), "details": res.get("details")},
                         "error": None if res.get("success") else res.get("message")
                     }, websocket)
 
@@ -549,12 +551,12 @@ async def websocket_endpoint(websocket: WebSocket):
                     res = await copier.copy_cancel_pending(payload)
                     
                     status = "ok" if res.get("success") else "error"
-                    await log_activity(res.get("message"), source="Copier", log_type="info" if res.get("success") else "error")
+                    await log_activity(res.get("message"), source="Copier", log_type="info" if res.get("success") else "error", details=res.get("details"))
                     
                     await manager.send_personal_message({
                         "requestId": req_id,
                         "status": status,
-                        "data": {"message": res.get("message")},
+                        "data": {"message": res.get("message"), "details": res.get("details")},
                         "error": None if res.get("success") else res.get("message")
                     }, websocket)
 
@@ -590,12 +592,12 @@ async def websocket_endpoint(websocket: WebSocket):
                     
                     res = await copier.copy_modify_order(payload)
                     status = "ok" if res.get("success") else "error"
-                    await log_activity(res.get("message"), source="Copier", log_type="info" if res.get("success") else "error")
+                    await log_activity(res.get("message"), source="Copier", log_type="info" if res.get("success") else "error", details=res.get("details"))
                     
                     await manager.send_personal_message({
                         "requestId": req_id,
                         "status": status,
-                        "data": {"message": res.get("message")},
+                        "data": {"message": res.get("message"), "details": res.get("details")},
                         "error": None if res.get("success") else res.get("message")
                     }, websocket)
 
@@ -607,12 +609,12 @@ async def websocket_endpoint(websocket: WebSocket):
                     res = await copier.copy_cancel_pending(adapted_payload)
                     
                     status = "ok" if res.get("success") else "error"
-                    await log_activity(res.get("message"), source="Copier", log_type="info" if res.get("success") else "error")
+                    await log_activity(res.get("message"), source="Copier", log_type="info" if res.get("success") else "error", details=res.get("details"))
                     
                     await manager.send_personal_message({
                         "requestId": req_id,
                         "status": status,
-                        "data": {"message": res.get("message")},
+                        "data": {"message": res.get("message"), "details": res.get("details")},
                         "error": None if res.get("success") else res.get("message")
                     }, websocket)
 
@@ -622,13 +624,116 @@ async def websocket_endpoint(websocket: WebSocket):
                     
                     res = await copier.copy_manage_position_stops(payload)
                     status = "ok" if res.get("success") else "error"
-                    await log_activity(res.get("message"), source="Copier", log_type="info" if res.get("success") else "error")
+                    await log_activity(res.get("message"), source="Copier", log_type="info" if res.get("success") else "error", details=res.get("details"))
                     
                     await manager.send_personal_message({
                         "requestId": req_id,
                         "status": status,
-                        "data": {"message": res.get("message")},
+                        "data": {"message": res.get("message"), "details": res.get("details")},
                         "error": None if res.get("success") else res.get("message")
+                    }, websocket)
+
+                elif command == "get_bridge_logs":
+                    target = payload.get("account")
+                    if not target:
+                        await manager.send_personal_message({
+                            "requestId": req_id,
+                            "status": "error",
+                            "error": "Missing 'account' in payload"
+                        }, websocket)
+                        continue
+
+                    if target == "cluster":
+                        log_file = "/app/scripts/logs/mt5_cluster.log"
+                        display_name = "MT5 Cluster"
+                    else:
+                        settings.load()
+                        all_accs = settings.get_all_accounts()
+                        acc = next((a for a in all_accs if str(a.get("name")) == str(target)), None)
+                        if not acc:
+                            await manager.send_personal_message({
+                                "requestId": req_id,
+                                "status": "error",
+                                "error": f"Account '{target}' not found."
+                            }, websocket)
+                            continue
+                        
+                        ip_port = acc.get("ip_port", "")
+                        port = None
+                        if ip_port:
+                            try:
+                                from urllib.parse import urlparse
+                                port = urlparse(ip_port).port
+                            except Exception:
+                                pass
+                        
+                        if not port:
+                            await manager.send_personal_message({
+                                "requestId": req_id,
+                                "status": "error",
+                                "error": f"No valid port configured for account '{target}'."
+                            }, websocket)
+                            continue
+                        
+                        log_file = f"/app/scripts/logs/bridge_{port}.log"
+                        display_name = f"Instance {target} (Port {port})"
+
+                    import os
+                    if not os.path.exists(log_file):
+                        content = f"Log file for {display_name} does not exist yet at {log_file}."
+                    else:
+                        try:
+                            with open(log_file, "r", encoding="utf-8", errors="replace") as f:
+                                lines = f.readlines()
+                                content = "".join(lines[-300:])
+                        except Exception as e:
+                            content = f"Error reading log file: {str(e)}"
+                    
+                    await manager.send_personal_message({
+                        "requestId": req_id,
+                        "status": "ok",
+                        "data": {
+                            "account": target,
+                            "displayName": display_name,
+                            "logs": content
+                        }
+                    }, websocket)
+
+                elif command == "clear_all_logs":
+                    import os
+                    import glob
+                    
+                    # 1. Clear in-memory logs
+                    async with logs_lock:
+                        activity_logs.clear()
+                        
+                    # 2. Clear log files in /app/scripts/logs
+                    logs_dir = "/app/scripts/logs"
+                    cleared_count = 0
+                    errors = []
+                    
+                    if os.path.exists(logs_dir):
+                        log_files = glob.glob(os.path.join(logs_dir, "*.log")) + glob.glob(os.path.join(logs_dir, "*.err"))
+                        for lf in log_files:
+                            try:
+                                with open(lf, "w", encoding="utf-8") as f:
+                                    f.truncate(0)
+                                cleared_count += 1
+                            except Exception as e:
+                                errors.append(f"Failed to clear {os.path.basename(lf)}: {e}")
+                    
+                    status = "ok" if not errors else "error"
+                    msg = f"Cleared {cleared_count} log files."
+                    if errors:
+                        msg += " Errors: " + "; ".join(errors)
+                        
+                    await log_activity(msg, source="System", log_type="info")
+                    
+                    await manager.send_personal_message({
+                        "requestId": req_id,
+                        "status": status,
+                        "data": {"message": msg},
+                        "error": "; ".join(errors) if errors else None
                     }, websocket)
 
                 else:

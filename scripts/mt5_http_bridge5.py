@@ -54,11 +54,17 @@ MAX_LOT_SIZES = {
 # Set precision for Decimal calculations to handle financial data accurately.
 getcontext().prec = 30
 
-# Setup basic logging configuration.
+# Setup basic logging configuration with file and console outputs.
+import os
+os.makedirs("/root/scripts/logs", exist_ok=True)
 logging.basicConfig(
     level=LOG_LEVEL,
     format='[%(asctime)s][%(levelname)s][%(threadName)s] %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
+    datefmt='%Y-%m-%d %H:%M:%S',
+    handlers=[
+        logging.FileHandler(f"/root/scripts/logs/bridge_{PORT}.log"),
+        logging.StreamHandler()
+    ]
 )
 
 # Cache for currency conversion pairs to avoid repeated slow lookups.
@@ -407,7 +413,7 @@ def atr_cache_updater():
                 if cached and cached.get("last_bar_time") == latest_time:
                     continue
                 
-                logging.info(f"Recalculating ATRs for {symbol} (new M1 bar time: {latest_time})")
+                # logging.info(f"Recalculating ATRs for {symbol} (new M1 bar time: {latest_time})")
                 with mt5_manager.lock:
                     rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M1, 0, 14600)
                 
@@ -642,6 +648,10 @@ def time_stop_monitor():
 # --- HTTP Request Handler ---
 # ==============================================================================
 class RequestHandler(BaseHTTPRequestHandler):
+    def log_message(self, format, *args):
+        # Silence HTTP access logs to avoid cluttering the system logs
+        pass
+
     """ Handles incoming HTTP POST requests and routes them to the correct handler. """
     def _send_response_headers(self, status_code, content_type):
         self.send_response(status_code)

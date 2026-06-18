@@ -2,6 +2,7 @@
 export DISPLAY=:1
 export WINEPREFIX="/config/.wine"
 export HOME="/root"
+export PYTHONUNBUFFERED=1
 
 # --- SYSTEM INIT ---
 if [ ! -d "/config/.wine/drive_c/Python310" ]; then
@@ -119,7 +120,7 @@ for i in {1..10}; do
     BRIDGE_PATH="/root/scripts/mt5_http_bridge${i}.py"
     if [ -f "${BRIDGE_PATH}" ]; then
         echo "Starting HTTP Bridge ${i}..."
-        wine /config/.wine/drive_c/Python310/python.exe "${BRIDGE_PATH}" &
+        wine /config/.wine/drive_c/Python310/python.exe -u "${BRIDGE_PATH}" &
         sleep 1
     fi
 done

@@ -237,7 +237,7 @@ class TradeCopier:
                 trade_payload["qty"] = base_qty
                 trade_payload["risk"] = 0.0
 
-            client = BridgeClient(ip_port)
+            client = BridgeClient(ip_port, timeout=15.0)
             tasks.append(client.execute_trade([trade_payload]))
             account_names.append(acc_name)
 
@@ -253,10 +253,11 @@ class TradeCopier:
         for name, res in zip(account_names, results):
             if isinstance(res, Exception):
                 overall_success = False
+                err_msg = str(res) or f"Exception: {res.__class__.__name__}"
                 summary_results.append({
                     "account": name,
                     "success": False,
-                    "error": f"Failed with exception: {res}"
+                    "error": f"Failed with exception: {err_msg}"
                 })
             else:
                 if not res.get("success", False):
@@ -306,7 +307,7 @@ class TradeCopier:
             point_value = float(point_value_dict.get(symbol_global, 0.0001))
             scaled_offset = offset_pips * point_value
 
-            client = BridgeClient(ip_port)
+            client = BridgeClient(ip_port, timeout=15.0)
             tasks.append(client.modify_order(symbol_broker, new_price_type, scaled_offset))
             account_names.append(acc_name)
 
@@ -318,12 +319,14 @@ class TradeCopier:
         summary_results = []
         for name, res in zip(account_names, results):
             if isinstance(res, Exception):
-                summary_results.append({"account": name, "success": False, "error": str(res)})
+                err_msg = str(res) or f"Exception: {res.__class__.__name__}"
+                summary_results.append({"account": name, "success": False, "error": err_msg})
             else:
                 summary_results.append({
                     "account": name,
                     "success": res.get("success", False),
-                    "message": res.get("message", res.get("error", ""))
+                    "message": res.get("message", ""),
+                    "error": res.get("error") or (res.get("results")[0].get("error") if "results" in res and res.get("results") else None)
                 })
 
         return {
@@ -372,7 +375,7 @@ class TradeCopier:
                 if tp_payload.get("type") in ["pips_from_entry", "pips_from_mid"]:
                     tp_payload["value"] = float(tp_payload.get("value", 0.0)) * point_value
 
-            client = BridgeClient(ip_port)
+            client = BridgeClient(ip_port, timeout=15.0)
             tasks.append(client.manage_position_stops(symbol_broker, sl_payload, tp_payload))
             account_names.append(acc_name)
 
@@ -384,12 +387,14 @@ class TradeCopier:
         summary_results = []
         for name, res in zip(account_names, results):
             if isinstance(res, Exception):
-                summary_results.append({"account": name, "success": False, "error": str(res)})
+                err_msg = str(res) or f"Exception: {res.__class__.__name__}"
+                summary_results.append({"account": name, "success": False, "error": err_msg})
             else:
                 summary_results.append({
                     "account": name,
                     "success": res.get("success", False),
-                    "message": res.get("message", res.get("error", ""))
+                    "message": res.get("message", ""),
+                    "error": res.get("error") or (res.get("results")[0].get("error") if "results" in res and res.get("results") else None)
                 })
 
         return {
@@ -424,7 +429,7 @@ class TradeCopier:
                     logger.info(f"Skipping flatten on account {acc_name} for symbol {symbol_global} (conversion is N/A or empty)")
                     continue
 
-            client = BridgeClient(ip_port)
+            client = BridgeClient(ip_port, timeout=15.0)
             tasks.append(client.cancel_and_flatten(symbol_broker))
             account_names.append(acc_name)
 
@@ -436,12 +441,14 @@ class TradeCopier:
         summary_results = []
         for name, res in zip(account_names, results):
             if isinstance(res, Exception):
-                summary_results.append({"account": name, "success": False, "error": str(res)})
+                err_msg = str(res) or f"Exception: {res.__class__.__name__}"
+                summary_results.append({"account": name, "success": False, "error": err_msg})
             else:
                 summary_results.append({
                     "account": name,
                     "success": res.get("success", False),
-                    "message": res.get("message") or (res.get("results")[0].get("message") if "results" in res else "")
+                    "message": res.get("message") or (res.get("results")[0].get("message") if "results" in res and res.get("results") else ""),
+                    "error": res.get("error") or (res.get("results")[0].get("error") if "results" in res and res.get("results") else None)
                 })
 
         return {
@@ -474,7 +481,7 @@ class TradeCopier:
                     logger.info(f"Skipping cancel pending on account {acc_name} for symbol {symbol_global} (conversion is N/A or empty)")
                     continue
 
-                client = BridgeClient(ip_port)
+                client = BridgeClient(ip_port, timeout=15.0)
                 tasks.append(client.cancel_order(symbol_broker))
                 account_names.append(acc_name)
 
@@ -485,12 +492,14 @@ class TradeCopier:
             summary_results = []
             for name, res in zip(account_names, results):
                 if isinstance(res, Exception):
-                    summary_results.append({"account": name, "success": False, "error": str(res)})
+                    err_msg = str(res) or f"Exception: {res.__class__.__name__}"
+                    summary_results.append({"account": name, "success": False, "error": err_msg})
                 else:
                     summary_results.append({
                         "account": name,
                         "success": res.get("success", False),
-                        "message": res.get("message", res.get("error", ""))
+                        "message": res.get("message", ""),
+                        "error": res.get("error") or (res.get("results")[0].get("error") if "results" in res and res.get("results") else None)
                     })
             return {
                 "success": all(r["success"] for r in summary_results),
@@ -501,7 +510,7 @@ class TradeCopier:
         # Otherwise, cancel ALL pending orders on all active accounts
         async def cancel_for_account(acc_dict: Dict[str, Any]) -> Dict[str, Any]:
             ip_port = acc_dict.get("ip_port")
-            client = BridgeClient(ip_port)
+            client = BridgeClient(ip_port, timeout=15.0)
             status = await client.get_account_status()
             if not status.get("success"):
                 return {"success": False, "error": status.get("error")}
@@ -527,12 +536,14 @@ class TradeCopier:
         for acc, res in zip(active_accounts, results):
             name = acc.get("name", "Unknown")
             if isinstance(res, Exception):
-                summary_results.append({"account": name, "success": False, "error": str(res)})
+                err_msg = str(res) or f"Exception: {res.__class__.__name__}"
+                summary_results.append({"account": name, "success": False, "error": err_msg})
             else:
                 summary_results.append({
                     "account": name,
                     "success": res.get("success", False),
-                    "message": res.get("message", "")
+                    "message": res.get("message", ""),
+                    "error": res.get("error") or (res.get("results")[0].get("error") if "results" in res and res.get("results") else None)
                 })
 
         return {
