@@ -73,6 +73,7 @@ venv.bak/
 
 # --- Logs & Performance Dumps ---
 *.log
+scripts/logs/
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
