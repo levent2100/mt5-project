@@ -446,7 +446,7 @@ export default function MicroPanel() {
                 <select
                   ref={selectRef}
                   value={selectedSymbol}
-                  disabled={wsStatus !== "connected" || isSubmitting}
+                  disabled={wsStatus !== "connected"}
                   className="pl-2 pr-8 py-1 text-xs font-semibold tracking-wide uppercase transition-all duration-200 border rounded-lg bg-neutral-50 border-neutral-200 text-neutral-800 hover:bg-neutral-100 hover:border-neutral-300 focus:outline-none focus:ring-0 appearance-none cursor-pointer"
                 >
                   <option value="">---</option>
@@ -490,7 +490,7 @@ export default function MicroPanel() {
             {/* BUY */}
             <button
               ref={buyBtnRef}
-              disabled={wsStatus !== "connected" || isSubmitting || atrPips === null}
+              disabled={wsStatus !== "connected" || atrPips === null}
               className="col-span-3 flex items-center justify-center gap-1.5 py-2 px-3 font-semibold text-xs rounded-xl text-white bg-emerald-600 hover:bg-emerald-500 active:scale-95 disabled:opacity-30 disabled:pointer-events-none transition-all duration-150 shadow-sm"
             >
               <TrendingUp className="w-4 h-4" />
@@ -500,7 +500,7 @@ export default function MicroPanel() {
             {/* SELL */}
             <button
               ref={sellBtnRef}
-              disabled={wsStatus !== "connected" || isSubmitting || atrPips === null}
+              disabled={wsStatus !== "connected" || atrPips === null}
               className="col-span-3 flex items-center justify-center gap-1.5 py-2 px-3 font-semibold text-xs rounded-xl text-white bg-rose-600 hover:bg-rose-500 active:scale-95 disabled:opacity-30 disabled:pointer-events-none transition-all duration-150 shadow-sm"
             >
               <TrendingDown className="w-4 h-4" />
@@ -510,7 +510,7 @@ export default function MicroPanel() {
             {/* FLATTEN / CLOSE */}
             <button
               ref={flattenBtnRef}
-              disabled={wsStatus !== "connected" || isSubmitting}
+              disabled={wsStatus !== "connected"}
               className="col-span-1 flex items-center justify-center py-2 px-2 font-semibold rounded-xl bg-neutral-100 border border-neutral-200 text-neutral-700 hover:bg-neutral-200 hover:text-neutral-800 active:scale-95 disabled:opacity-30 disabled:pointer-events-none transition-all duration-150"
               title="Close selected symbol positions"
             >

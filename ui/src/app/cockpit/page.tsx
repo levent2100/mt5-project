@@ -2107,7 +2107,7 @@ export default function CockpitPanel() {
                     data-field="microSymbol"
                     value={microSymbol}
                     onChange={(e) => setMicroSymbol(e.target.value)}
-                    disabled={wsStatus !== 'connected' || microSubmitting}
+                    disabled={wsStatus !== 'connected'}
                     className={`pl-2 pr-8 py-1.5 text-xs font-semibold tracking-wide uppercase transition-all duration-200 border rounded-lg appearance-none cursor-pointer focus:outline-none ${
                       theme === 'dark'
                         ? 'bg-neutral-900 border-neutral-800 text-neutral-200 hover:bg-neutral-850 hover:border-neutral-750'
@@ -2146,7 +2146,7 @@ export default function CockpitPanel() {
               <div className="grid grid-cols-7 gap-2">
                 <button
                   data-action="micro-buy"
-                  disabled={wsStatus !== 'connected' || microSubmitting || microAtrPips === null}
+                  disabled={wsStatus !== 'connected' || microAtrPips === null}
                   className="col-span-3 flex items-center justify-center gap-1.5 py-2 px-3 font-bold text-xs rounded-xl text-white bg-emerald-600 hover:bg-emerald-500 active:scale-95 disabled:opacity-30 disabled:pointer-events-none transition-all duration-150 shadow-sm"
                 >
                   <TrendingUp className="w-3.5 h-3.5" />
@@ -2155,7 +2155,7 @@ export default function CockpitPanel() {
 
                 <button
                   data-action="micro-sell"
-                  disabled={wsStatus !== 'connected' || microSubmitting || microAtrPips === null}
+                  disabled={wsStatus !== 'connected' || microAtrPips === null}
                   className="col-span-3 flex items-center justify-center gap-1.5 py-2 px-3 font-bold text-xs rounded-xl text-white bg-rose-600 hover:bg-rose-500 active:scale-95 disabled:opacity-30 disabled:pointer-events-none transition-all duration-150 shadow-sm"
                 >
                   <TrendingDown className="w-3.5 h-3.5" />
@@ -2164,7 +2164,7 @@ export default function CockpitPanel() {
 
                 <button
                   data-action="micro-flatten"
-                  disabled={wsStatus !== 'connected' || microSubmitting || !microSymbol}
+                  disabled={wsStatus !== 'connected' || !microSymbol}
                   className={`col-span-1 flex items-center justify-center py-2 px-2 font-bold rounded-xl border active:scale-95 disabled:opacity-30 disabled:pointer-events-none transition-all duration-150 ${
                     theme === 'dark'
                       ? 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:bg-neutral-800'
