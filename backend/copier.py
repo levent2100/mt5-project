@@ -237,7 +237,7 @@ class TradeCopier:
                 trade_payload["qty"] = base_qty
                 trade_payload["risk"] = 0.0
 
-            client = BridgeClient(ip_port, timeout=15.0)
+            client = BridgeClient(ip_port, timeout=2.5)
             tasks.append(client.execute_trade([trade_payload]))
             account_names.append(acc_name)
 
@@ -307,7 +307,7 @@ class TradeCopier:
             point_value = float(point_value_dict.get(symbol_global, 0.0001))
             scaled_offset = offset_pips * point_value
 
-            client = BridgeClient(ip_port, timeout=15.0)
+            client = BridgeClient(ip_port, timeout=2.5)
             tasks.append(client.modify_order(symbol_broker, new_price_type, scaled_offset))
             account_names.append(acc_name)
 
@@ -375,7 +375,7 @@ class TradeCopier:
                 if tp_payload.get("type") in ["pips_from_entry", "pips_from_mid"]:
                     tp_payload["value"] = float(tp_payload.get("value", 0.0)) * point_value
 
-            client = BridgeClient(ip_port, timeout=15.0)
+            client = BridgeClient(ip_port, timeout=2.5)
             tasks.append(client.manage_position_stops(symbol_broker, sl_payload, tp_payload))
             account_names.append(acc_name)
 
@@ -429,7 +429,7 @@ class TradeCopier:
                     logger.info(f"Skipping flatten on account {acc_name} for symbol {symbol_global} (conversion is N/A or empty)")
                     continue
 
-            client = BridgeClient(ip_port, timeout=15.0)
+            client = BridgeClient(ip_port, timeout=2.5)
             tasks.append(client.cancel_and_flatten(symbol_broker))
             account_names.append(acc_name)
 
@@ -481,7 +481,7 @@ class TradeCopier:
                     logger.info(f"Skipping cancel pending on account {acc_name} for symbol {symbol_global} (conversion is N/A or empty)")
                     continue
 
-                client = BridgeClient(ip_port, timeout=15.0)
+                client = BridgeClient(ip_port, timeout=2.5)
                 tasks.append(client.cancel_order(symbol_broker))
                 account_names.append(acc_name)
 
@@ -510,7 +510,7 @@ class TradeCopier:
         # Otherwise, cancel ALL pending orders on all active accounts
         async def cancel_for_account(acc_dict: Dict[str, Any]) -> Dict[str, Any]:
             ip_port = acc_dict.get("ip_port")
-            client = BridgeClient(ip_port, timeout=15.0)
+            client = BridgeClient(ip_port, timeout=2.5)
             status = await client.get_account_status()
             if not status.get("success"):
                 return {"success": False, "error": status.get("error")}

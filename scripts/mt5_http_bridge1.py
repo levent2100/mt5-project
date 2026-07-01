@@ -85,8 +85,12 @@ class PriorityRLock:
         self._owner = None
         self._count = 0
 
-    def acquire(self, priority="low"):
+    def acquire(self, priority="low", timeout=None):
         current_thread = threading.current_thread()
+        end_time = None
+        if timeout is not None:
+            end_time = time.time() + timeout
+
         with self._cond:
             # If the current thread already holds the lock, support reentrancy
             if self._owner == current_thread:
@@ -97,13 +101,25 @@ class PriorityRLock:
                 self._high_waiting += 1
                 try:
                     while self._owner is not None:
-                        self._cond.wait()
+                        if timeout is not None:
+                            remaining = end_time - time.time()
+                            if remaining <= 0:
+                                return False
+                            self._cond.wait(timeout=remaining)
+                        else:
+                            self._cond.wait()
                 finally:
                     self._high_waiting -= 1
             else:
                 # low priority waits if lock is held OR if there are any high-priority threads waiting
                 while self._owner is not None or self._high_waiting > 0:
-                    self._cond.wait()
+                    if timeout is not None:
+                        remaining = end_time - time.time()
+                        if remaining <= 0:
+                            return False
+                        self._cond.wait(timeout=remaining)
+                    else:
+                        self._cond.wait()
             
             self._owner = current_thread
             self._count = 1
@@ -120,11 +136,11 @@ class PriorityRLock:
                 self._cond.notify_all()
         return True
 
-    def high_priority(self):
-        return PriorityContext(self, "high")
+    def high_priority(self, timeout=None):
+        return PriorityContext(self, "high", timeout=timeout)
 
-    def low_priority(self):
-        return PriorityContext(self, "low")
+    def low_priority(self, timeout=None):
+        return PriorityContext(self, "low", timeout=timeout)
 
     def __enter__(self):
         # Default to low priority if used as standard context manager
@@ -135,16 +151,19 @@ class PriorityRLock:
         self.release()
 
 class PriorityContext:
-    def __init__(self, lock, priority):
+    def __init__(self, lock, priority, timeout=None):
         self.lock = lock
         self.priority = priority
+        self.timeout = timeout
+        self.acquired = False
 
     def __enter__(self):
-        self.lock.acquire(priority=self.priority)
-        return self.lock
+        self.acquired = self.lock.acquire(priority=self.priority, timeout=self.timeout)
+        return self.acquired
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.lock.release()
+        if self.acquired:
+            self.lock.release()
 
 # ==============================================================================
 # --- MT5 Connection Management ---
@@ -781,8 +800,14 @@ class RequestHandler(BaseHTTPRequestHandler):
 
             if handler:
                 is_high_priority = command in ["trade", "cancelandflatten", "movestoploss", "modify_order", "cancel_order", "manage_position_stops"]
-                lock_ctx = mt5_manager.lock.high_priority() if is_high_priority else mt5_manager.lock.low_priority()
-                with lock_ctx:
+                # Give high-priority actions a strict timeout of 1.5 seconds to acquire the lock.
+                # If they cannot acquire it within 1.5s, fail immediately instead of queueing.
+                timeout = 1.5 if is_high_priority else None
+                lock_ctx = mt5_manager.lock.high_priority(timeout=timeout) if is_high_priority else mt5_manager.lock.low_priority()
+                with lock_ctx as acquired:
+                    if not acquired:
+                        return self._send_error_response("Bridge is busy executing another trade. Please try again.", 503)
+                    
                     if is_high_priority:
                         expected_login = get_expected_login_by_port(PORT)
                         if expected_login:

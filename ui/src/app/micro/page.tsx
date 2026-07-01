@@ -28,7 +28,7 @@ export default function MicroPanel() {
   const [isMounted, setIsMounted] = useState<boolean>(false);
 
   const wsRef = useRef<WebSocket | null>(null);
-  const pendingRequests = useRef<Record<string, { resolve: (val: any) => void; reject: (err: any) => void; timeout: NodeJS.Timeout }>>({});
+  const pendingRequests = useRef<Record<string, { resolve: (val: any) => void; reject: (err: any) => void; timeout: NodeJS.Timeout; requestKey?: string }>>({});
   const previousPnL = useRef<number | null>(null);
   const messageTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -44,6 +44,11 @@ export default function MicroPanel() {
 
   // Helper to show status logs or alerts
   const showStatus = (text: string, type: "success" | "danger" | "info" | "warning", duration = 4000) => {
+    // Intercept and redirect duplicate/in-progress request errors to a friendly warning alert
+    if (text.includes("Request already in progress") || text.includes("already in progress")) {
+      type = "warning";
+      text = "Action already in progress. Please wait...";
+    }
     if (messageTimeoutRef.current) clearTimeout(messageTimeoutRef.current);
     setMessage({ text, type });
     if (duration > 0) {
@@ -187,6 +192,12 @@ export default function MicroPanel() {
         return reject("Socket not connected");
       }
 
+      const requestKey = `${command}:${JSON.stringify(payload)}`;
+      // Prevent duplicate identical requests from queueing up concurrently
+      if (Object.values(pendingRequests.current).some((r: any) => r.requestKey === requestKey)) {
+        return reject("Request already in progress");
+      }
+
       const requestId = Math.random().toString(36).substring(2, 11);
       const msg = {
         receiver: "proplink",
@@ -202,9 +213,9 @@ export default function MicroPanel() {
           pendingRequests.current[requestId].reject("Request Timeout");
           delete pendingRequests.current[requestId];
         }
-      }, 10000);
+      }, 3000); // reduced to 3.0 seconds
 
-      pendingRequests.current[requestId] = { resolve, reject, timeout };
+      pendingRequests.current[requestId] = { resolve, reject, timeout, requestKey };
       wsRef.current.send(JSON.stringify(msg));
     });
   };

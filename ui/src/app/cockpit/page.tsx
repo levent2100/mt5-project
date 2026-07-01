@@ -122,7 +122,7 @@ export default function CockpitPanel() {
   const [message, setMessage] = useState<{ text: string; type: 'success' | 'danger' | 'info' | 'warning' | null }>({ text: '', type: null });
   
   const wsRef = useRef<WebSocket | null>(null);
-  const pendingRequests = useRef<Record<string, { resolve: (data: any) => void; reject: (err: any) => void; timeout: any }>>({});
+  const pendingRequests = useRef<Record<string, { resolve: (data: any) => void; reject: (err: any) => void; timeout: any; requestKey?: string }>>({});
   const selectedSymbolRef = useRef<string>("");
   const containerRef = useRef<HTMLDivElement>(null);
   const messageTimeoutRef = useRef<any>(null);
@@ -163,6 +163,11 @@ export default function CockpitPanel() {
 
   // Helper to show logs on the status strip
   const showStatus = (text: string, type: 'success' | 'danger' | 'info' | 'warning', duration = 4000) => {
+    // Intercept and redirect duplicate/in-progress request errors to a friendly warning alert
+    if (text.includes('Request already in progress') || text.includes('already in progress')) {
+      type = 'warning';
+      text = 'Action already in progress. Please wait...';
+    }
     if (messageTimeoutRef.current) clearTimeout(messageTimeoutRef.current);
     setMessage({ text, type });
     if (duration > 0) {
@@ -302,6 +307,12 @@ export default function CockpitPanel() {
         return reject('Socket not connected');
       }
 
+      const requestKey = `${command}:${JSON.stringify(payload)}`;
+      // Prevent duplicate identical requests from queueing up concurrently
+      if (Object.values(pendingRequests.current).some((r: any) => r.requestKey === requestKey)) {
+        return reject('Request already in progress');
+      }
+
       const requestId = Math.random().toString(36).substring(2, 11);
       const msg = {
         receiver: 'proplink',
@@ -317,9 +328,9 @@ export default function CockpitPanel() {
           pendingRequests.current[requestId].reject('Request Timeout');
           delete pendingRequests.current[requestId];
         }
-      }, 10000);
+      }, 3000); // reduced to 3.0 seconds
 
-      pendingRequests.current[requestId] = { resolve, reject, timeout };
+      pendingRequests.current[requestId] = { resolve, reject, timeout, requestKey };
       wsRef.current.send(JSON.stringify(msg));
     });
   };

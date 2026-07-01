@@ -197,7 +197,7 @@ export default function Dashboard() {
   
   // WebSocket Reference
   const wsRef = useRef<WebSocket | null>(null);
-  const pendingRequests = useRef<Record<string, { resolve: (data: any) => void; reject: (err: any) => void; timeout: NodeJS.Timeout }>>({});
+  const pendingRequests = useRef<Record<string, { resolve: (data: any) => void; reject: (err: any) => void; timeout: NodeJS.Timeout; requestKey?: string }>>({});
 
   const selectedSymbolRef = useRef<string>("");
   useEffect(() => {
@@ -206,6 +206,11 @@ export default function Dashboard() {
 
   // --- Helper: Render dynamic HSL alerts ---
   const triggerAlert = (text: string, type: 'success' | 'danger' | 'info' | 'warning' = 'info') => {
+    // Intercept and redirect duplicate/in-progress request errors to a friendly warning alert
+    if (text.includes('Request already in progress') || text.includes('already in progress')) {
+      type = 'warning';
+      text = 'Action already in progress. Please wait...';
+    }
     setAlertMessage({ text, type });
     setTimeout(() => {
       setAlertMessage(current => current?.text === text ? null : current);
@@ -417,6 +422,12 @@ export default function Dashboard() {
         return reject('Socket not connected');
       }
 
+      const requestKey = `${command}:${JSON.stringify(payload)}`;
+      // Prevent duplicate identical requests from queueing up concurrently
+      if (Object.values(pendingRequests.current).some((r: any) => r.requestKey === requestKey)) {
+        return reject('Request already in progress');
+      }
+
       const requestId = Math.random().toString(36).substring(2, 11);
       const msg = {
         receiver: 'proplink',
@@ -433,9 +444,9 @@ export default function Dashboard() {
           delete pendingRequests.current[requestId];
           addLog(`Request ${command} timed out.`, 'UI', 'error');
         }
-      }, 8000);
+      }, 3000); // reduced to 3.0 seconds
 
-      pendingRequests.current[requestId] = { resolve, reject, timeout };
+      pendingRequests.current[requestId] = { resolve, reject, timeout, requestKey };
       wsRef.current.send(JSON.stringify(msg));
     });
   };
