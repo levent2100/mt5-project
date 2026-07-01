@@ -72,6 +72,80 @@ logging.basicConfig(
 _conversion_symbol_cache = {}
 
 
+class PriorityRLock:
+    """
+    A reentrant lock (RLock) that supports two priorities: "high" and "low".
+    "high" priority acquisitions (typically user actions) jump the queue and are served 
+    before any waiting "low" priority acquisitions (typically background polling/system tasks).
+    """
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._cond = threading.Condition(self._lock)
+        self._high_waiting = 0
+        self._owner = None
+        self._count = 0
+
+    def acquire(self, priority="low"):
+        current_thread = threading.current_thread()
+        with self._cond:
+            # If the current thread already holds the lock, support reentrancy
+            if self._owner == current_thread:
+                self._count += 1
+                return True
+            
+            if priority == "high":
+                self._high_waiting += 1
+                try:
+                    while self._owner is not None:
+                        self._cond.wait()
+                finally:
+                    self._high_waiting -= 1
+            else:
+                # low priority waits if lock is held OR if there are any high-priority threads waiting
+                while self._owner is not None or self._high_waiting > 0:
+                    self._cond.wait()
+            
+            self._owner = current_thread
+            self._count = 1
+            return True
+
+    def release(self):
+        current_thread = threading.current_thread()
+        with self._cond:
+            if self._owner != current_thread:
+                raise RuntimeError("Cannot release un-acquired lock")
+            self._count -= 1
+            if self._count == 0:
+                self._owner = None
+                self._cond.notify_all()
+        return True
+
+    def high_priority(self):
+        return PriorityContext(self, "high")
+
+    def low_priority(self):
+        return PriorityContext(self, "low")
+
+    def __enter__(self):
+        # Default to low priority if used as standard context manager
+        self.acquire(priority="low")
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.release()
+
+class PriorityContext:
+    def __init__(self, lock, priority):
+        self.lock = lock
+        self.priority = priority
+
+    def __enter__(self):
+        self.lock.acquire(priority=self.priority)
+        return self.lock
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.lock.release()
+
 # ==============================================================================
 # --- MT5 Connection Management ---
 # ==============================================================================
@@ -79,7 +153,7 @@ class MT5ConnectionManager:
     """ Manages a persistent connection to the MetaTrader 5 terminal. """
     def __init__(self):
         self._connected = False
-        self.lock = threading.RLock()
+        self.lock = PriorityRLock()
 
     def connect(self):
         """ Establishes the initial connection to the MT5 terminal. """
@@ -355,6 +429,9 @@ def get_latest_server_time():
 _atr_cache = {}
 _atr_cache_lock = threading.Lock()
 
+_rates_history = {}
+_rates_history_lock = threading.Lock()
+
 def get_global_settings():
     import os
     paths = [
@@ -385,6 +462,100 @@ def get_bridge_active_symbols():
             active_symbols.append(b_sym)
     return list(set(active_symbols))
 
+def update_atr_for_symbol(symbol):
+    """
+    Updates the rates history cache for a symbol, recalculates ATR values,
+    and updates the ATR cache.
+    Must be called under appropriate MT5 locks if making MT5 API calls.
+    """
+    # 1. Fetch latest 10 bars to see if we can do an incremental update
+    with _rates_history_lock:
+        cached_bars = _rates_history.get(symbol)
+    
+    if cached_bars and len(cached_bars) >= 15:
+        # Incremental update: fetch only the last 10 bars
+        rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M1, 0, 10)
+        if rates is None or len(rates) == 0:
+            logging.warning(f"Failed to copy incremental rates for {symbol}. Error: {mt5.last_error()}")
+            # If incremental fails, try a full fetch below
+            rates = None
+    else:
+        rates = None
+
+    if rates is None:
+        # Full update: fetch 14600 bars
+        logging.info(f"Fetching full M1 history (14600 bars) for {symbol}...")
+        rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M1, 0, 14600)
+        if rates is None or len(rates) == 0:
+            logging.error(f"Failed to copy full rates for {symbol}. Error: {mt5.last_error()}")
+            return None
+        # Convert to list of dicts
+        new_bars = [{"time": int(b['time']), "high": float(b['high']), "low": float(b['low']), "close": float(b['close'])} for b in rates]
+        with _rates_history_lock:
+            _rates_history[symbol] = new_bars
+        cached_bars = new_bars
+    else:
+        # Merge incremental rates
+        new_bars = [{"time": int(b['time']), "high": float(b['high']), "low": float(b['low']), "close": float(b['close'])} for b in rates]
+        with _rates_history_lock:
+            cached_bars = _rates_history.get(symbol, [])
+            bar_dict = {b['time']: b for b in cached_bars}
+            for b in new_bars:
+                bar_dict[b['time']] = b
+            sorted_times = sorted(bar_dict.keys())
+            if len(sorted_times) > 14600:
+                sorted_times = sorted_times[-14600:]
+            merged_bars = [bar_dict[t] for t in sorted_times]
+            _rates_history[symbol] = merged_bars
+            cached_bars = merged_bars
+
+    if len(cached_bars) < 15:
+        logging.error(f"Not enough bars to calculate ATR for {symbol}. Count: {len(cached_bars)}")
+        return None
+
+    high = np.array([b['high'] for b in cached_bars], dtype=np.float64)
+    low = np.array([b['low'] for b in cached_bars], dtype=np.float64)
+    close = np.array([b['close'] for b in cached_bars], dtype=np.float64)
+
+    # Calculate using Wilder's ATR (talib.ATR)
+    atr_vals_2 = talib.ATR(high, low, close, timeperiod=2)
+    atr_2 = float(atr_vals_2[-2]) if atr_vals_2 is not None and len(atr_vals_2) > 1 and not np.isnan(atr_vals_2[-2]) else 0.0
+    
+    atr_vals_3 = talib.ATR(high, low, close, timeperiod=3)
+    atr_3 = float(atr_vals_3[-2]) if atr_vals_3 is not None and len(atr_vals_3) > 1 and not np.isnan(atr_vals_3[-2]) else 0.0
+    
+    atr_vals_5 = talib.ATR(high, low, close, timeperiod=5)
+    atr_5 = float(atr_vals_5[-2]) if atr_vals_5 is not None and len(atr_vals_5) > 1 and not np.isnan(atr_vals_5[-2]) else 0.0
+    
+    atr_vals_14 = talib.ATR(high, low, close, timeperiod=14)
+    atr_14 = float(atr_vals_14[-2]) if atr_vals_14 is not None and len(atr_vals_14) > 1 and not np.isnan(atr_vals_14[-2]) else 0.0
+    
+    long_period = 14400
+    if len(cached_bars) < long_period + 2:
+        long_period = len(cached_bars) - 2
+    
+    if long_period >= 2:
+        atr_vals_14400 = talib.ATR(high, low, close, timeperiod=long_period)
+        atr_14400 = float(atr_vals_14400[-2]) if atr_vals_14400 is not None and len(atr_vals_14400) > 1 and not np.isnan(atr_vals_14400[-2]) else 0.0
+    else:
+        atr_14400 = 0.0
+    
+    max_atr = max(atr_2, atr_3, atr_5, atr_14, atr_14400)
+    
+    latest_time = cached_bars[-1]['time']
+    
+    with _atr_cache_lock:
+        _atr_cache[symbol] = {
+            "last_bar_time": latest_time,
+            "max_atr": max_atr,
+            "atr_2": atr_2,
+            "atr_3": atr_3,
+            "atr_5": atr_5,
+            "atr_14": atr_14,
+            "atr_14400": atr_14400
+        }
+    return max_atr
+
 def atr_cache_updater():
     logging.info("ATR Cache Updater thread started.")
     while True:
@@ -398,7 +569,7 @@ def atr_cache_updater():
                 continue
                 
             for symbol in active_symbols:
-                with mt5_manager.lock:
+                with mt5_manager.lock.low_priority():
                     ensure_symbol_selected(symbol)
                     rates_latest = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M1, 0, 1)
                 
@@ -414,52 +585,8 @@ def atr_cache_updater():
                     continue
                 
                 # logging.info(f"Recalculating ATRs for {symbol} (new M1 bar time: {latest_time})")
-                with mt5_manager.lock:
-                    rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M1, 0, 14600)
-                
-                if rates is None or len(rates) < 15:
-                    logging.error(f"Failed to copy historical rates for {symbol} on M1. Error: {mt5.last_error()}")
-                    continue
-                
-                high = np.array([float(bar['high']) for bar in rates], dtype=np.float64)
-                low = np.array([float(bar['low']) for bar in rates], dtype=np.float64)
-                close = np.array([float(bar['close']) for bar in rates], dtype=np.float64)
-                
-                # Calculate using Wilder's ATR (talib.ATR)
-                atr_vals_2 = talib.ATR(high, low, close, timeperiod=2)
-                atr_2 = float(atr_vals_2[-2]) if atr_vals_2 is not None and len(atr_vals_2) > 1 and not np.isnan(atr_vals_2[-2]) else 0.0
-                
-                atr_vals_3 = talib.ATR(high, low, close, timeperiod=3)
-                atr_3 = float(atr_vals_3[-2]) if atr_vals_3 is not None and len(atr_vals_3) > 1 and not np.isnan(atr_vals_3[-2]) else 0.0
-                
-                atr_vals_5 = talib.ATR(high, low, close, timeperiod=5)
-                atr_5 = float(atr_vals_5[-2]) if atr_vals_5 is not None and len(atr_vals_5) > 1 and not np.isnan(atr_vals_5[-2]) else 0.0
-                
-                atr_vals_14 = talib.ATR(high, low, close, timeperiod=14)
-                atr_14 = float(atr_vals_14[-2]) if atr_vals_14 is not None and len(atr_vals_14) > 1 and not np.isnan(atr_vals_14[-2]) else 0.0
-                
-                long_period = 14400
-                if len(rates) < long_period + 2:
-                    long_period = len(rates) - 2
-                
-                if long_period >= 2:
-                    atr_vals_14400 = talib.ATR(high, low, close, timeperiod=long_period)
-                    atr_14400 = float(atr_vals_14400[-2]) if atr_vals_14400 is not None and len(atr_vals_14400) > 1 and not np.isnan(atr_vals_14400[-2]) else 0.0
-                else:
-                    atr_14400 = 0.0
-                
-                max_atr = max(atr_2, atr_3, atr_5, atr_14, atr_14400)
-                
-                with _atr_cache_lock:
-                    _atr_cache[symbol] = {
-                        "last_bar_time": latest_time,
-                        "max_atr": max_atr,
-                        "atr_2": atr_2,
-                        "atr_3": atr_3,
-                        "atr_5": atr_5,
-                        "atr_14": atr_14,
-                        "atr_14400": atr_14400
-                    }
+                with mt5_manager.lock.low_priority():
+                    update_atr_for_symbol(symbol)
         except Exception as e:
             logging.error(f"Error in atr_cache_updater loop: {e}")
 
@@ -470,51 +597,9 @@ def calculate_atr(symbol, period=14):
         return cached["max_atr"]
     
     logging.warning(f"ATR cache miss for {symbol}, performing synchronous fallback.")
-    rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M1, 0, 14600)
-    if rates is None or len(rates) < 5:
-        return 0.0
-        
-    high = np.array([float(bar['high']) for bar in rates], dtype=np.float64)
-    low = np.array([float(bar['low']) for bar in rates], dtype=np.float64)
-    close = np.array([float(bar['close']) for bar in rates], dtype=np.float64)
-    
-    # Calculate using Wilder's ATR (talib.ATR)
-    atr_vals_2 = talib.ATR(high, low, close, timeperiod=2)
-    atr_2 = float(atr_vals_2[-2]) if atr_vals_2 is not None and len(atr_vals_2) > 1 and not np.isnan(atr_vals_2[-2]) else 0.0
-    
-    atr_vals_3 = talib.ATR(high, low, close, timeperiod=3)
-    atr_3 = float(atr_vals_3[-2]) if atr_vals_3 is not None and len(atr_vals_3) > 1 and not np.isnan(atr_vals_3[-2]) else 0.0
-    
-    atr_vals_5 = talib.ATR(high, low, close, timeperiod=5)
-    atr_5 = float(atr_vals_5[-2]) if atr_vals_5 is not None and len(atr_vals_5) > 1 and not np.isnan(atr_vals_5[-2]) else 0.0
-    
-    atr_vals_14 = talib.ATR(high, low, close, timeperiod=14)
-    atr_14 = float(atr_vals_14[-2]) if atr_vals_14 is not None and len(atr_vals_14) > 1 and not np.isnan(atr_vals_14[-2]) else 0.0
-    
-    long_period = 14400
-    if len(rates) < long_period + 2:
-        long_period = len(rates) - 2
-    if long_period >= 2:
-        atr_vals_14400 = talib.ATR(high, low, close, timeperiod=long_period)
-        atr_14400 = float(atr_vals_14400[-2]) if atr_vals_14400 is not None and len(atr_vals_14400) > 1 and not np.isnan(atr_vals_14400[-2]) else 0.0
-    else:
-        atr_14400 = 0.0
-        
-    max_atr = max(atr_2, atr_3, atr_5, atr_14, atr_14400)
-    
-    rates_latest = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M1, 0, 1)
-    latest_time = int(rates_latest[0]['time']) if rates_latest is not None and len(rates_latest) > 0 else int(time.time())
-    with _atr_cache_lock:
-        _atr_cache[symbol] = {
-            "last_bar_time": latest_time,
-            "max_atr": max_atr,
-            "atr_2": atr_2,
-            "atr_3": atr_3,
-            "atr_5": atr_5,
-            "atr_14": atr_14,
-            "atr_14400": atr_14400
-        }
-    return max_atr
+    with mt5_manager.lock.low_priority():
+        res = update_atr_for_symbol(symbol)
+    return res if res is not None else 0.0
 
 def get_account_settings(login_num):
     """
@@ -603,10 +688,9 @@ def time_stop_monitor():
             if not ENABLE_TIME_STOP or not ENABLE_TIMES_STOP:
                 continue
                 
-            if not mt5_manager.ensure_connection():
-                continue
-                
-            with mt5_manager.lock:
+            with mt5_manager.lock.low_priority():
+                if not mt5_manager.ensure_connection():
+                    continue
                 # Load TimeStop value from propfundsettings.json
                 time_stop = 180  # Default fallback
                 import os
@@ -696,20 +780,23 @@ class RequestHandler(BaseHTTPRequestHandler):
             handler = handlers.get(command)
 
             if handler:
-                if command in ["trade", "cancelandflatten", "movestoploss", "modify_order", "cancel_order", "manage_position_stops"]:
-                    expected_login = get_expected_login_by_port(PORT)
-                    if expected_login:
-                        if not mt5_manager.ensure_connection():
-                            return self._send_error_response("Failed to connect to MetaTrader 5.", 503)
-                        acc_info = mt5.account_info()
-                        if not acc_info:
-                            return self._send_error_response("Failed to retrieve MT5 account info.", 500)
-                        actual_login = str(acc_info.login)
-                        if actual_login != expected_login:
-                            err_msg = f"Strict account check failed: MT5 terminal is logged into '{actual_login}', but settings configure '{expected_login}' for port {PORT}. Request rejected for safety."
-                            logging.critical(err_msg)
-                            return self._send_error_response(err_msg, 400)
-                handler(data)
+                is_high_priority = command in ["trade", "cancelandflatten", "movestoploss", "modify_order", "cancel_order", "manage_position_stops"]
+                lock_ctx = mt5_manager.lock.high_priority() if is_high_priority else mt5_manager.lock.low_priority()
+                with lock_ctx:
+                    if is_high_priority:
+                        expected_login = get_expected_login_by_port(PORT)
+                        if expected_login:
+                            if not mt5_manager.ensure_connection():
+                                return self._send_error_response("Failed to connect to MetaTrader 5.", 503)
+                            acc_info = mt5.account_info()
+                            if not acc_info:
+                                return self._send_error_response("Failed to retrieve MT5 account info.", 500)
+                            actual_login = str(acc_info.login)
+                            if actual_login != expected_login:
+                                err_msg = f"Strict account check failed: MT5 terminal is logged into '{actual_login}', but settings configure '{expected_login}' for port {PORT}. Request rejected for safety."
+                                logging.critical(err_msg)
+                                return self._send_error_response(err_msg, 400)
+                    handler(data)
             else: self._send_error_response(f"Unknown request type: {command}", 404)
         except json.JSONDecodeError: self._send_error_response("Invalid JSON format in request body.", 400)
         except Exception as e: logging.exception("Unhandled exception during POST request:"); self._send_error_response(f"Internal server error: {e}", 500)
@@ -718,8 +805,8 @@ class RequestHandler(BaseHTTPRequestHandler):
         return {mt5.ORDER_TYPE_BUY_LIMIT: "limit", mt5.ORDER_TYPE_SELL_LIMIT: "limit", mt5.ORDER_TYPE_BUY_STOP: "stop", mt5.ORDER_TYPE_SELL_STOP: "stop"}.get(mt5_type, "unknown")
 
     def handle_trade(self, data):
-        if not mt5_manager.ensure_connection(): return self._send_error_response("Failed to connect to MetaTrader 5.", 503)
-        with mt5_manager.lock:
+        with mt5_manager.lock.high_priority():
+            if not mt5_manager.ensure_connection(): return self._send_error_response("Failed to connect to MetaTrader 5.", 503)
             if mt5.positions_total() > 0: return self._send_error_response("Cannot open new trade: An open position already exists.", 403)
             if mt5.orders_total() > 0: return self._send_error_response("Cannot open new trade: A pending order already exists.", 403)
             if 'trades' not in data or not data['trades']: return self._send_error_response("Invalid request: 'trades' array is missing or empty.", 400)
@@ -862,8 +949,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._send_json_response({"success": overall_success, "results": results})
 
     def handle_modify_order(self, data):
-        if not mt5_manager.ensure_connection(): return self._send_error_response("Failed to connect to MetaTrader 5.", 503)
-        with mt5_manager.lock:
+        with mt5_manager.lock.high_priority():
+            if not mt5_manager.ensure_connection(): return self._send_error_response("Failed to connect to MetaTrader 5.", 503)
             instrument, new_price_type, offset_pips = data.get("instrument"), data.get("new_price_type", "").lower(), float(data.get("offset_pips", 0.0))
             if not instrument or not new_price_type: return self._send_error_response("Missing 'instrument' or 'new_price_type'", 400)
             orders = mt5.orders_get(symbol=instrument)
@@ -899,8 +986,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             else: self._send_error_response(f"Failed to modify order {order.ticket}. Result: {result.comment if result else 'N/A'}", 500)
 
     def handle_cancel_order(self, data):
-        if not mt5_manager.ensure_connection(): return self._send_error_response("Failed to connect to MetaTrader 5.", 503)
-        with mt5_manager.lock:
+        with mt5_manager.lock.high_priority():
+            if not mt5_manager.ensure_connection(): return self._send_error_response("Failed to connect to MetaTrader 5.", 503)
             instrument = data.get("instrument")
             if not instrument: return self._send_error_response("Missing 'instrument' field", 400)
             orders = mt5.orders_get(symbol=instrument)
@@ -911,8 +998,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             else: self._send_error_response(f"Failed to cancel order {orders[0].ticket}. Result: {result.comment if result else 'N/A'}", 500)
 
     def handle_manage_position_stops(self, data):
-        if not mt5_manager.ensure_connection(): return self._send_error_response("Failed to connect to MetaTrader 5.", 503)
-        with mt5_manager.lock:
+        with mt5_manager.lock.high_priority():
+            if not mt5_manager.ensure_connection(): return self._send_error_response("Failed to connect to MetaTrader 5.", 503)
             # CORRECTED: Assign payload first, then use it to get the instrument.
             payload = data.get("payload", {})
             instrument = payload.get("symbol")
@@ -954,8 +1041,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             else: self._send_error_response(f"Failed to update SL/TP. Result: {result.comment if result else 'N/A'}", 500)
 
     def handle_move_stoploss(self, data):
-        if not mt5_manager.ensure_connection(): return self._send_error_response("Failed to connect to MetaTrader 5.", 503)
-        with mt5_manager.lock:
+        with mt5_manager.lock.high_priority():
+            if not mt5_manager.ensure_connection(): return self._send_error_response("Failed to connect to MetaTrader 5.", 503)
             instrument = data.get("instrument")
             if not instrument: return self._send_error_response("Invalid request: 'instrument' field is missing.", 400)
             
@@ -972,8 +1059,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             else: self._send_error_response(f"Failed to move SL. Result: {result.comment if result else 'N/A'}", 500)
         
     def handle_get_spreads(self, data):
-        if not mt5_manager.ensure_connection(): return self._send_error_response("Failed to connect to MetaTrader 5.", 503)
-        with mt5_manager.lock:
+        with mt5_manager.lock.low_priority():
+            if not mt5_manager.ensure_connection(): return self._send_error_response("Failed to connect to MetaTrader 5.", 503)
             acc_info = mt5.account_info()
             if not acc_info: return self._send_error_response("Failed to get account info.", 500)
             
@@ -996,8 +1083,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._send_json_response(final_response)
             
     def handle_get_atr(self, data):
-        if not mt5_manager.ensure_connection(): return self._send_error_response("Failed to connect to MetaTrader 5.", 503)
-        with mt5_manager.lock:
+        with mt5_manager.lock.low_priority():
+            if not mt5_manager.ensure_connection(): return self._send_error_response("Failed to connect to MetaTrader 5.", 503)
             instrument = data.get("instrument")
             if not instrument: return self._send_error_response("Missing 'instrument' field", 400)
             
@@ -1020,8 +1107,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             })
             
     def handle_get_all_atrs(self, data):
-        if not mt5_manager.ensure_connection(): return self._send_error_response("Failed to connect to MetaTrader 5.", 503)
-        with mt5_manager.lock:
+        with mt5_manager.lock.low_priority():
+            if not mt5_manager.ensure_connection(): return self._send_error_response("Failed to connect to MetaTrader 5.", 503)
             instruments = data.get("instruments", [])
             results = {}
             for instrument in instruments:
@@ -1044,8 +1131,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             
      
     def handle_account_status(self, data):
-        if not mt5_manager.ensure_connection(): return self._send_error_response("Failed to connect to MetaTrader 5.", 503)
-        with mt5_manager.lock: 
+        with mt5_manager.lock.low_priority():
+            if not mt5_manager.ensure_connection(): return self._send_error_response("Failed to connect to MetaTrader 5.", 503)
         
             try:
                 acc_info = mt5.account_info()
@@ -1134,8 +1221,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                 return
             
     def handle_cancel_flatten(self, data):
-        if not mt5_manager.ensure_connection(): return self._send_error_response("Failed to connect to MetaTrader 5.", 503)
-        with mt5_manager.lock:
+        with mt5_manager.lock.high_priority():
+            if not mt5_manager.ensure_connection(): return self._send_error_response("Failed to connect to MetaTrader 5.", 503)
             target_instrument = data.get("instrument")
             result, actions_log = {"success": True, "message": "", "error": None}, []
             
