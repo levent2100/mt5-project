@@ -191,7 +191,6 @@ export default function TradeLogPage() {
       });
   };
 
-  // Helper to format UNIX timestamps to standard HH:MM:SS (No Date)
   const formatTime = (ts: number) => {
     if (!ts) return '-';
     const date = new Date(ts * 1000);
@@ -258,8 +257,8 @@ export default function TradeLogPage() {
         <div className="w-full flex items-center justify-between">
           <div className="flex items-center space-x-4">
             <Link href="/" className={`p-2 border rounded-lg transition ${theme === 'dark'
-              ? 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white hover:bg-neutral-700'
-              : 'bg-white border-neutral-200 text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50'
+                ? 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white hover:bg-neutral-700'
+                : 'bg-white border-neutral-200 text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50'
               }`}>
               <ArrowLeft className="w-4 h-4" />
             </Link>
@@ -284,8 +283,8 @@ export default function TradeLogPage() {
             <button
               onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
               className={`p-2 border rounded-lg transition ${theme === 'dark'
-                ? 'bg-neutral-900 border-neutral-800 text-amber-400 hover:text-amber-300 hover:bg-neutral-700'
-                : 'bg-white border-neutral-200 text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50'
+                  ? 'bg-neutral-900 border-neutral-800 text-amber-400 hover:text-amber-300 hover:bg-neutral-700'
+                  : 'bg-white border-neutral-200 text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50'
                 }`}
             >
               {theme === 'dark' ? '☀️' : '🌙'}
@@ -343,8 +342,8 @@ export default function TradeLogPage() {
                 onChange={(e) => setSearchSymbol(e.target.value)}
                 placeholder="Symbol..."
                 className={`pl-8 pr-3 py-1.5 w-32 border focus:outline-none rounded-lg text-sm transition-all placeholder-neutral-500 ${theme === 'dark'
-                  ? 'bg-[#18181C] border-[#222228] text-white focus:border-indigo-500'
-                  : 'bg-neutral-50 border-neutral-200 text-neutral-900 focus:border-indigo-500'
+                    ? 'bg-[#18181C] border-[#222228] text-white focus:border-indigo-500'
+                    : 'bg-neutral-50 border-neutral-200 text-neutral-900 focus:border-indigo-500'
                   }`}
               />
             </div>
@@ -352,10 +351,10 @@ export default function TradeLogPage() {
             <button
               onClick={() => setShowDiscrepanciesOnly(prev => !prev)}
               className={`flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-xs font-semibold transition ${showDiscrepanciesOnly
-                ? 'bg-red-500/10 border-red-500/40 text-red-500'
-                : theme === 'dark'
-                  ? 'bg-[#18181C] border-[#222228] text-neutral-300 hover:bg-neutral-800'
-                  : 'bg-white border-neutral-200 text-neutral-700 hover:bg-neutral-50'
+                  ? 'bg-red-500/10 border-red-500/40 text-red-500'
+                  : theme === 'dark'
+                    ? 'bg-[#18181C] border-[#222228] text-neutral-300 hover:bg-neutral-800'
+                    : 'bg-white border-neutral-200 text-neutral-700 hover:bg-neutral-50'
                 }`}
             >
               <Sliders className="w-3.5 h-3.5" />
@@ -390,7 +389,7 @@ export default function TradeLogPage() {
                   <th className="py-3 px-4 w-[140px]">Symbol / Dir</th>
                   <th className="py-3 px-3 w-[90px]">Time</th>
                   {activeAccounts.map((accName) => (
-                    <th key={accName} className={`py-3 px-2 border-l text-center min-w-[90px] ${theme === 'dark' ? 'border-neutral-800/50' : 'border-neutral-200/50'
+                    <th key={accName} className={`py-3 px-2 border-l text-center min-w-[100px] ${theme === 'dark' ? 'border-neutral-800/50' : 'border-neutral-200/50'
                       }`}>
                       {accName}
                     </th>
@@ -415,8 +414,14 @@ export default function TradeLogPage() {
                 ) : (
                   filteredGroups.map((g) => {
                     const discrepancyCheck = checkDiscrepancy(g);
+
+                    // Identify the first open time in the group for latency tracking
                     const tradeDetailsList = Object.values(g.accounts);
                     const baseOpenTime = tradeDetailsList.length > 0 ? Math.min(...tradeDetailsList.map(t => t.open_time)) : 0;
+
+                    // Calculate the group's average net profit (Profit + Commission)
+                    const totalNetProfit = tradeDetailsList.reduce((sum, t) => sum + (t.profit + t.commission), 0);
+                    const avgNetProfit = tradeDetailsList.length > 0 ? totalNetProfit / tradeDetailsList.length : 0;
 
                     return (
                       <React.Fragment key={g.id}>
@@ -453,7 +458,7 @@ export default function TradeLogPage() {
                             </div>
                           </td>
 
-                          {/* Dynamic Account Columns - Compact */}
+                          {/* Dynamic Account Columns - Net Profit + Deviation */}
                           {activeAccounts.map((accName) => {
                             const trade = g.accounts[accName];
                             if (!trade) {
@@ -470,17 +475,29 @@ export default function TradeLogPage() {
                             const delay = trade.open_time - baseOpenTime;
                             const delayStr = delay > 0 ? `+${delay}s` : '0s';
 
+                            // Net Profit and Deviation from the Average
+                            const netProfit = trade.profit + trade.commission;
+                            const deviation = netProfit - avgNetProfit;
+
                             return (
                               <td key={accName} className={`py-2 px-2 border-l text-center align-middle ${theme === 'dark' ? 'border-neutral-800/30' : 'border-neutral-200/50'
                                 }`}>
-                                <div className="flex flex-col items-center justify-center gap-0.5">
-                                  <span className={`inline-flex px-1.5 py-0.5 font-bold rounded text-xs ${trade.pips >= 0 ? 'bg-emerald-500/10 text-emerald-500' : 'bg-red-500/10 text-red-500'
+                                <div className="flex flex-col items-center justify-center gap-1">
+                                  {/* Net Profit */}
+                                  <span className={`inline-flex px-2 py-0.5 font-bold rounded text-xs ${netProfit >= 0 ? 'bg-emerald-500/10 text-emerald-500' : 'bg-red-500/10 text-red-500'
                                     }`}>
-                                    {trade.pips > 0 ? '+' : ''}{trade.pips.toFixed(1)}
+                                    {netProfit > 0 ? '+' : ''}{netProfit.toFixed(3)}%
                                   </span>
-                                  <div className="text-[10px] text-gray-500 dark:text-neutral-500">
-                                    <span className={delay > 1 ? 'text-yellow-500 font-semibold' : ''}>D: {delayStr}</span>
-                                    {trade.commission !== 0 && <span> | C: {trade.commission.toFixed(1)}</span>}
+
+                                  {/* Deviation & Delay */}
+                                  <div className="text-[10px] flex items-center justify-center gap-1.5">
+                                    <span className={`font-semibold ${deviation >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+                                      Δ {deviation > 0 ? '+' : ''}{deviation.toFixed(3)}%
+                                    </span>
+                                    <span className="text-gray-300 dark:text-neutral-600">|</span>
+                                    <span className={delay > 1 ? 'text-yellow-500 font-bold' : 'text-gray-400 dark:text-neutral-500'}>
+                                      {delayStr}
+                                    </span>
                                   </div>
                                 </div>
                               </td>
@@ -497,7 +514,7 @@ export default function TradeLogPage() {
                           </td>
                         </tr>
 
-                        {/* EXPANDED DRAWER - Vertically / Horizontally aligned clean table */}
+                        {/* EXPANDED DRAWER */}
                         {expandedGroup === g.id && (
                           <tr className={theme === 'dark' ? 'bg-[#0A0A0C]/80' : 'bg-neutral-50'}>
                             <td colSpan={2 + activeAccounts.length + 1} className={`p-4 border-b ${theme === 'dark' ? 'border-neutral-800' : 'border-neutral-200'}`}>
@@ -537,7 +554,6 @@ export default function TradeLogPage() {
                                               {trade.pips > 0 ? '+' : ''}{trade.pips.toFixed(1)}
                                             </span>
                                           </td>
-
                                           {/* Commission */}
                                           <td className="py-2 px-4 text-right font-mono text-[13px]">{trade.commission.toFixed(3)}%</td>
                                           {/* Profit */}
