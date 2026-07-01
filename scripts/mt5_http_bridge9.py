@@ -1281,7 +1281,6 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self._send_error_response(f"Internal server error retrieving history deals: {e}", 500)
 
 
-
 def get_today_trades():
     # Look back 24 hours to ensure timezone overlaps are captured
     server_time_now = get_latest_server_time()
@@ -1292,6 +1291,10 @@ def get_today_trades():
         now_ts = int(datetime.now().timestamp())
         start_of_day_ts = now_ts - 24 * 3600
         end_of_day_ts = now_ts + 3600
+
+    # Get account balance for percentage calculations
+    account_info = mt5.account_info()
+    account_balance = account_info.balance if account_info is not None else 0.0
 
     global_cfg = get_global_settings()
     acc_cfg = get_account_settings(MT5_LOGIN if MT5_LOGIN > 0 else get_expected_login_by_port(PORT))
@@ -1337,9 +1340,18 @@ def get_today_trades():
         open_price = sum(d.price * d.volume for d in in_deals) / volume if volume > 0 else in_deals[0].price
         open_time = in_deals[0].time
         
-        commission = sum(d.commission for d in p_deals)
-        swap = sum(d.swap for d in p_deals)
-        profit = sum(d.profit for d in p_deals)
+        # Absolute calculations
+        abs_commission = sum(d.commission for d in p_deals)
+        abs_swap = sum(d.swap for d in p_deals)
+        abs_profit = sum(d.profit for d in p_deals)
+
+        # Percentage calculations (% of Account Balance)
+        if account_balance > 0:
+            commission_pct = (abs_commission / account_balance) * 100
+            profit_pct = (abs_profit / account_balance) * 100
+        else:
+            commission_pct = 0.0
+            profit_pct = 0.0
         
         if not out_deals:
             continue
@@ -1380,13 +1392,12 @@ def get_today_trades():
             "open_price": round(open_price, digits),
             "close_price": round(close_price, digits),
             "pips": round(pips, 2),
-            "commission": round(commission, 2),
-            "swap": round(swap, 2),
-            "profit": round(profit, 2)
+            "commission": round(commission_pct, 3), # Now returning as a % up to 3 decimals
+            "swap": round(abs_swap, 2),
+            "profit": round(profit_pct, 3)          # Now returning as a % up to 3 decimals
         })
         
     return trades
-
 # ==============================================================================
 # --- Server Execution ---
 # ==============================================================================
