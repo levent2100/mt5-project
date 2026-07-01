@@ -45,7 +45,7 @@ interface MatchedGroup {
 }
 
 export default function TradeLogPage() {
-  const [theme, setTheme] = useState<'light' | 'dark'>('dark');
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [groups, setGroups] = useState<MatchedGroup[]>([]);
   const [activeAccounts, setActiveAccounts] = useState<string[]>([]);
   const [isFetching, setIsFetching] = useState(false);
@@ -67,6 +67,9 @@ export default function TradeLogPage() {
     const savedTheme = localStorage.getItem('propfirm-tradelog-theme') as 'light' | 'dark';
     if (savedTheme) {
       setTheme(savedTheme);
+    } else {
+      // Default to light mode when no saved preference
+      setTheme('light');
     }
   }, []);
 
@@ -79,6 +82,20 @@ export default function TradeLogPage() {
     }
     localStorage.setItem('propfirm-tradelog-theme', theme);
   }, [theme]);
+
+  // Symbol map state for unified instrument names
+  const [symbolMap, setSymbolMap] = useState<Record<string, string>>({});
+
+  // Fetch symbol mapping on component mount
+  useEffect(() => {
+    fetch('/api/symbols')
+      .then((res) => res.json())
+      .then((data) => setSymbolMap(data))
+      .catch((err) => {
+        console.error('Failed to load symbol map:', err);
+        setSymbolMap({});
+      });
+  }, []);
 
   // Connect WebSocket
   const connectWS = () => {
@@ -171,7 +188,12 @@ export default function TradeLogPage() {
 
     sendRequest('fetch_tradelogs')
       .then((data) => {
-        setGroups(data.groups || []);
+        // Apply unified symbol mapping if available
+        const mappedGroups = (data.groups || []).map((g: MatchedGroup) => ({
+          ...g,
+          symbol: symbolMap[g.symbol] || g.symbol,
+        }));
+        setGroups(mappedGroups);
         setActiveAccounts(data.active_accounts || []);
       })
       .catch((err) => {
@@ -291,7 +313,7 @@ export default function TradeLogPage() {
               className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-semibold rounded-lg shadow-lg shadow-indigo-600/15 transition-all active:scale-95"
             >
               <RefreshCw className={`w-4 h-4 ${isFetching ? 'animate-spin' : ''}`} />
-              {isFetching ? 'Fetching Trades...' : 'Fetch Today\'s Trades'}
+              {isFetching ? 'Fetching Trades...' : "Fetch Today's Trades"}
             </button>
             <button
               onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
@@ -456,14 +478,17 @@ export default function TradeLogPage() {
               }`}>
                 {filteredGroups.length === 0 ? (
                   <tr>
-                    <td colSpan={2 + activeAccounts.length + 1} className="py-12 text-center text-gray-500">
+                    <td colSpan={2 + activeAccounts.length + 1} className="py-12 text-center">
                       {isFetching ? (
                         <div className="flex flex-col items-center gap-2">
                           <RefreshCw className="w-8 h-8 text-indigo-500 animate-spin" />
                           <span className="text-sm">Retrieving journal entries from brokers...</span>
                         </div>
                       ) : (
-                        'No matching trade executions found for today.'
+                        <div className="p-4 bg-red-950/40 border border-red-900/50 text-red-200 rounded-xl flex items-start gap-3 animate-fade-in">
+                          <AlertTriangle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+                          <p className="font-semibold text-sm">No matching trade executions found for today.</p>
+                        </div>
                       )}
                     </td>
                   </tr>
@@ -565,55 +590,58 @@ export default function TradeLogPage() {
                           </td>
                         </tr>
 
-                        {/* Expanded Drawer Details */}
+                        {/* Expanded Drawer Details – Tabular Layout */}
                         {expandedGroup === g.id && (
                           <tr className={theme === 'dark' ? 'bg-[#0A0A0C]/40' : 'bg-neutral-50/50'}>
                             <td colSpan={2 + activeAccounts.length + 1} className={`py-4 px-6 border-b ${theme === 'dark' ? 'border-neutral-800' : 'border-neutral-200'}`}>
-                              <div className="space-y-4">
-                                <div className={`flex items-center gap-2 border-b pb-2 text-xs font-semibold uppercase tracking-wider ${
-                                  theme === 'dark' ? 'border-[#222228] text-neutral-450' : 'border-neutral-200/80 text-neutral-500'
-                                }`}>
-                                  <Info className="w-4 h-4 text-indigo-500" />
-                                  <span>Detailed execution journals per account</span>
-                                </div>
-
-                                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                              <table className="w-full text-left border-collapse">
+                                <thead>
+                                  <tr className={`bg-${theme === 'dark' ? '#121212' : 'white'} text-xs font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-neutral-400' : 'text-neutral-500'}`}>
+                                    <th className="py-2 px-3">Account</th>
+                                    <th className="py-2 px-3">Position ID</th>
+                                    <th className="py-2 px-3">Volume (lots)</th>
+                                    <th className="py-2 px-3">Open Time</th>
+                                    <th className="py-2 px-3">Close Time</th>
+                                    <th className="py-2 px-3">Prices (O → C)</th>
+                                    <th className="py-2 px-3">Pips</th>
+                                    <th className="py-2 px-3">Commission</th>
+                                    <th className="py-2 px-3">Swap</th>
+                                    <th className="py-2 px-3">Profit</th>
+                                  </tr>
+                                </thead>
+                                <tbody className={`divide-y ${theme === 'dark' ? 'divide-neutral-800/40' : 'divide-neutral-200/50'}`}>
                                   {activeAccounts.map((accName) => {
                                     const trade = g.accounts[accName];
                                     if (!trade) {
                                       return (
-                                        <div key={accName} className="p-3 bg-red-950/15 border border-red-900/30 rounded-xl space-y-1">
-                                          <p className="text-xs font-bold text-red-400 uppercase">{accName}</p>
-                                          <p className="text-xs text-red-500 font-medium mt-1">No matched execution journal found.</p>
-                                        </div>
+                                        <tr key={accName} className="bg-red-950/15">
+                                          <td className="py-2 px-3" colSpan={10}>
+                                            <span className="text-red-400 font-medium">{accName} – No matched execution journal found.</span>
+                                          </td>
+                                        </tr>
                                       );
                                     }
-
                                     return (
-                                      <div key={accName} className={`p-3 border rounded-xl space-y-1.5 text-xs ${
-                                        theme === 'dark' 
-                                          ? 'bg-[#18181C] border-[#222228] text-neutral-300' 
-                                          : 'bg-white border-neutral-250 text-neutral-700 shadow-2xs'
-                                      }`}>
-                                        <p className={`font-bold border-b pb-1 uppercase flex justify-between ${
-                                          theme === 'dark' ? 'text-white border-[#222228]' : 'text-neutral-900 border-neutral-200'
-                                        }`}>
-                                          <span>{accName}</span>
-                                          <span className="text-neutral-400 font-medium">#{trade.position_id}</span>
-                                        </p>
-                                        <div className="space-y-0.5">
-                                          <div>Volume: <span className={`font-semibold ${theme === 'dark' ? 'text-white' : 'text-neutral-900'}`}>{trade.volume} lots</span></div>
-                                          <div>Open Time: <span className="font-medium text-gray-500">{new Date(trade.open_time * 1000).toLocaleString()}</span></div>
-                                          <div>Close Time: <span className="font-medium text-gray-500">{new Date(trade.close_time * 1000).toLocaleString()}</span></div>
-                                          <div>Swap Fee: <span className={`font-semibold ${theme === 'dark' ? 'text-white' : 'text-neutral-900'}`}>${trade.swap.toFixed(2)}</span></div>
-                                          <div>Comm: <span className={`font-semibold ${theme === 'dark' ? 'text-white' : 'text-neutral-900'}`}>${trade.commission.toFixed(2)}</span></div>
-                                          <div>Gross Profit: <span className={`font-semibold ${trade.profit >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>${trade.profit.toFixed(2)}</span></div>
-                                        </div>
-                                      </div>
+                                      <tr key={accName} className={`${theme === 'dark' ? 'bg-[#18181C] text-neutral-300' : 'bg-white text-neutral-700'} border`}>
+                                        <td className="py-2 px-3 font-medium">{accName}</td>
+                                        <td className="py-2 px-3">#{trade.position_id}</td>
+                                        <td className="py-2 px-3">{trade.volume}</td>
+                                        <td className="py-2 px-3">{new Date(trade.open_time * 1000).toLocaleString()}</td>
+                                        <td className="py-2 px-3">{new Date(trade.close_time * 1000).toLocaleString()}</td>
+                                        <td className="py-2 px-3">{trade.open_price} → {trade.close_price}</td>
+                                        <td className="py-2 px-3">
+                                          <span className={`inline-flex px-2 py-0.5 rounded-lg text-xs ${trade.pips >= 0 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
+                                            {trade.pips >= 0 ? '+' : ''}{trade.pips.toFixed(1)} pips
+                                          </span>
+                                        </td>
+                                        <td className="py-2 px-3">{trade.commission.toFixed(2)}</td>
+                                        <td className="py-2 px-3">{trade.swap.toFixed(2)}</td>
+                                        <td className="py-2 px-3" style={{ color: trade.profit >= 0 ? '#10B981' : '#EF4444' }}>{trade.profit.toFixed(2)}</td>
+                                      </tr>
                                     );
                                   })}
-                                </div>
-                              </div>
+                                </tbody>
+                              </table>
                             </td>
                           </tr>
                         )}

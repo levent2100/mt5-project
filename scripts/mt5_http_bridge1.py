@@ -1292,6 +1292,11 @@ def get_today_trades():
         start_of_day_ts = now_ts - 24 * 3600
         end_of_day_ts = now_ts + 3600
 
+    global_cfg = get_global_settings()
+    acc_cfg = get_account_settings(MT5_LOGIN if MT5_LOGIN > 0 else get_expected_login_by_port(PORT))
+    name_conversions = acc_cfg.get("NameConversions", {})
+    inverted_conversions = {b_sym: g_sym for g_sym, b_sym in name_conversions.items()}
+
     # Fetch all deals for today
     deals = mt5.history_deals_get(start_of_day_ts, end_of_day_ts)
     if deals is None:
@@ -1323,7 +1328,8 @@ def get_today_trades():
         if not in_deals:
             continue
 
-        symbol = in_deals[0].symbol
+        local_symbol = in_deals[0].symbol
+        unified_symbol = inverted_conversions.get(local_symbol, local_symbol)
         direction = "buy" if in_deals[0].type == mt5.DEAL_TYPE_BUY else "sell"
         
         volume = sum(d.volume for d in in_deals)
@@ -1341,18 +1347,18 @@ def get_today_trades():
         close_volume = sum(d.volume for d in out_deals)
         close_price = sum(d.price * d.volume for d in out_deals) / close_volume if close_volume > 0 else out_deals[-1].price
         
-        sym_info = mt5.symbol_info(symbol)
+        sym_info = mt5.symbol_info(local_symbol)
         digits = 5
         pip_multiplier = 0.0001
         
         if sym_info:
             digits = sym_info.digits
             # Dynamically calculate pip size based on digit precision and symbol conventions
-            if digits == 3 or "JPY" in symbol:
+            if digits == 3 or "JPY" in local_symbol:
                 pip_multiplier = 0.01
             elif digits == 5:
                 pip_multiplier = 0.0001
-            elif "XAU" in symbol or "GOLD" in symbol.upper():
+            elif "XAU" in local_symbol or "GOLD" in local_symbol.upper():
                 pip_multiplier = 0.1
             else:
                 pip_multiplier = 1.0 if sym_info.point == 0.0 else sym_info.point
@@ -1365,7 +1371,7 @@ def get_today_trades():
         
         trades.append({
             "position_id": pid,
-            "symbol": symbol,
+            "symbol": unified_symbol,
             "direction": direction,
             "volume": round(volume, 2),
             "open_time": open_time,
