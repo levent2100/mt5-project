@@ -404,6 +404,55 @@ async def poll_atr():
         
         await asyncio.sleep(1.0)
 
+def group_trades(all_trades: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    # Sort all trades by open_time
+    sorted_trades = sorted(all_trades, key=lambda x: x["open_time"])
+    
+    groups = []
+    for t in sorted_trades:
+        matched_group = None
+        for g in groups:
+            # Match key: symbol, direction
+            if g["symbol"] != t["symbol"] or g["direction"] != t["direction"]:
+                continue
+            # Avoid adding duplicate accounts to the same matched trade group
+            if t["account"] in g["accounts"]:
+                continue
+            # Within 20 seconds time difference
+            if abs(t["open_time"] - g["first_open_time"]) <= 20:
+                matched_group = g
+                break
+        
+        if matched_group is not None:
+            matched_group["accounts"][t["account"]] = t
+        else:
+            groups.append({
+                "symbol": t["symbol"],
+                "direction": t["direction"],
+                "first_open_time": t["open_time"],
+                "accounts": {t["account"]: t}
+            })
+            
+    formatted_groups = []
+    for idx, g in enumerate(groups):
+        times_open = [t["open_time"] for t in g["accounts"].values()]
+        times_close = [t["close_time"] for t in g["accounts"].values()]
+        avg_open = sum(times_open) / len(times_open)
+        avg_close = sum(times_close) / len(times_close) if times_close else 0
+        
+        formatted_groups.append({
+            "id": f"group_{idx}",
+            "symbol": g["symbol"],
+            "direction": g["direction"],
+            "open_time": int(avg_open),
+            "close_time": int(avg_close),
+            "accounts": g["accounts"]
+        })
+        
+    # Newest trades first
+    formatted_groups.sort(key=lambda x: x["open_time"], reverse=True)
+    return formatted_groups
+
 # --- WebSocket Route Entry ---
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -503,6 +552,49 @@ async def websocket_endpoint(websocket: WebSocket):
                         "requestId": req_id,
                         "status": "ok",
                         "data": {"account": ui_acc}
+                    }, websocket)
+
+                elif command == "fetch_tradelogs":
+                    active_accounts = copier.get_active_accounts()
+                    
+                    async def fetch_account_history(acc):
+                        name = acc.get("name")
+                        ip_port = acc.get("ip_port")
+                        if not ip_port:
+                            return name, []
+                        try:
+                            # 2.5 second timeout on history fetching
+                            client = BridgeClient(ip_port, timeout=2.5)
+                            res = await client.get_history_trades()
+                            if res.get("success"):
+                                return name, res.get("trades", [])
+                            else:
+                                logger.warning(f"Failed to fetch history for account {name}: {res.get('error')}")
+                                return name, []
+                        except Exception as e:
+                            logger.error(f"Error fetching history for account {name}: {e}")
+                            return name, []
+
+                    tasks = [fetch_account_history(acc) for acc in active_accounts]
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+                    
+                    all_flat_trades = []
+                    for res in results:
+                        if isinstance(res, tuple):
+                            acc_name, trades = res
+                            for t in trades:
+                                t["account"] = acc_name
+                                all_flat_trades.append(t)
+                                
+                    matched_groups = group_trades(all_flat_trades)
+                    
+                    await manager.send_personal_message({
+                        "requestId": req_id,
+                        "status": "ok",
+                        "data": {
+                            "groups": matched_groups,
+                            "active_accounts": [acc.get("name") for acc in active_accounts]
+                        }
                     }, websocket)
 
                 elif command == "trade":

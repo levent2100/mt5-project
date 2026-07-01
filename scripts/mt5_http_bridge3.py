@@ -774,7 +774,7 @@ class RequestHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self._send_response_headers(204, 'text/plain')
 
-def do_POST(self):
+    def do_POST(self):
         try:
             content_length = int(self.headers.get('Content-Length', 0))
             body = self.rfile.read(content_length).decode('utf-8')
@@ -793,7 +793,8 @@ def do_POST(self):
                 "cancel_order": self.handle_cancel_order, 
                 "manage_position_stops": self.handle_manage_position_stops,
                 "getatr": self.handle_get_atr,
-                "getallatrs": self.handle_get_all_atrs
+                "getallatrs": self.handle_get_all_atrs,
+                "gethistorytrades": self.handle_get_history_trades
             }
             handler = handlers.get(command)
 
@@ -824,6 +825,7 @@ def do_POST(self):
             else: self._send_error_response(f"Unknown request type: {command}", 404)
         except json.JSONDecodeError: self._send_error_response("Invalid JSON format in request body.", 400)
         except Exception as e: logging.exception("Unhandled exception during POST request:"); self._send_error_response(f"Internal server error: {e}", 500)
+
     def _map_mt5_order_type_to_string(self, mt5_type):
         return {mt5.ORDER_TYPE_BUY_LIMIT: "limit", mt5.ORDER_TYPE_SELL_LIMIT: "limit", mt5.ORDER_TYPE_BUY_STOP: "stop", mt5.ORDER_TYPE_SELL_STOP: "stop"}.get(mt5_type, "unknown")
 
@@ -1266,6 +1268,120 @@ def do_POST(self):
             if not actions_log: actions_log.append("No open orders or positions to act on.")
             result["message"] = " ".join(actions_log)
             self._send_json_response({"success": result["success"], "results": [result]})
+
+    def handle_get_history_trades(self, data):
+        with mt5_manager.lock.low_priority():
+            if not mt5_manager.ensure_connection():
+                return self._send_error_response("Failed to connect to MetaTrader 5.", 503)
+            try:
+                trades = get_today_trades()
+                self._send_json_response({"success": True, "trades": trades})
+            except Exception as e:
+                logging.exception("Exception during history deals retrieval:")
+                self._send_error_response(f"Internal server error retrieving history deals: {e}", 500)
+
+def get_today_trades():
+    # Get server time to calculate start/end of day
+    server_time_now = get_latest_server_time()
+    if server_time_now > 0:
+        server_time_dt = datetime.fromtimestamp(server_time_now)
+        start_of_day_dt = server_time_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+        start_of_day_ts = int(start_of_day_dt.timestamp())
+        end_of_day_ts = server_time_now
+    else:
+        today_dt_obj = datetime.now()
+        start_of_day_dt = datetime.combine(today_dt_obj.date(), dt_time.min)
+        start_of_day_ts = int(start_of_day_dt.timestamp())
+        end_of_day_ts = int(today_dt_obj.timestamp())
+
+    # Fetch all deals for today
+    deals = mt5.history_deals_get(start_of_day_ts, end_of_day_ts)
+    if deals is None:
+        return []
+
+    # Group deals by position_id
+    pos_deals = {}
+    for d in deals:
+        pid = d.position_id
+        if pid not in pos_deals:
+            pos_deals[pid] = []
+        pos_deals[pid].append(d)
+
+    trades = []
+    for pid, p_deals in pos_deals.items():
+        # Sort deals by time
+        p_deals.sort(key=lambda x: x.time)
+        
+        # We find the IN deal and the OUT deals
+        in_deals = [d for d in p_deals if d.entry == mt5.DEAL_ENTRY_IN]
+        out_deals = [d for d in p_deals if d.entry in [mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_INOUT]]
+        
+        if not in_deals:
+            # Fallback if position opened before today but closed today
+            in_deals_fallback = mt5.history_deals_get(position=pid)
+            if in_deals_fallback:
+                in_deals = [d for d in in_deals_fallback if d.entry == mt5.DEAL_ENTRY_IN]
+
+        if not in_deals:
+            continue
+
+        symbol = in_deals[0].symbol
+        direction = "buy" if in_deals[0].type == mt5.DEAL_TYPE_BUY else "sell"
+        
+        volume = sum(d.volume for d in in_deals)
+        open_price = sum(d.price * d.volume for d in in_deals) / volume if volume > 0 else in_deals[0].price
+        open_time = in_deals[0].time
+        
+        commission = sum(d.commission for d in p_deals)
+        swap = sum(d.swap for d in p_deals)
+        profit = sum(d.profit for d in p_deals)
+        
+        if not out_deals:
+            continue
+            
+        close_time = out_deals[-1].time
+        close_volume = sum(d.volume for d in out_deals)
+        close_price = sum(d.price * d.volume for d in out_deals) / close_volume if close_volume > 0 else out_deals[-1].price
+        
+        sym_info = mt5.symbol_info(symbol)
+        digits = 5
+        pip_multiplier = 0.0001
+        
+        if sym_info:
+            digits = sym_info.digits
+            # Dynamically calculate pip size based on digit precision and symbol conventions
+            if digits == 3 or "JPY" in symbol:
+                pip_multiplier = 0.01
+            elif digits == 5:
+                pip_multiplier = 0.0001
+            elif "XAU" in symbol or "GOLD" in symbol.upper():
+                pip_multiplier = 0.1
+            else:
+                pip_multiplier = 1.0 if sym_info.point == 0.0 else sym_info.point
+        
+        price_diff = close_price - open_price
+        if direction == "sell":
+            price_diff = -price_diff
+            
+        pips = price_diff / pip_multiplier if pip_multiplier > 0 else price_diff
+        
+        trades.append({
+            "position_id": pid,
+            "symbol": symbol,
+            "direction": direction,
+            "volume": round(volume, 2),
+            "open_time": open_time,
+            "close_time": close_time,
+            "open_price": round(open_price, digits),
+            "close_price": round(close_price, digits),
+            "pips": round(pips, 2),
+            "commission": round(commission, 2),
+            "swap": round(swap, 2),
+            "profit": round(profit, 2)
+        })
+        
+    return trades
+
 
 # ==============================================================================
 # --- Server Execution ---

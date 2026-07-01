@@ -2225,6 +2225,20 @@ export default function CockpitPanel() {
                 MICRO PAD
               </button>
 
+              <a
+                href="/tradelog"
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Open Trade Log Sync Analyzer"
+                className={`py-1 px-1.5 rounded transition-all border text-[9.5px] font-bold flex items-center justify-center ${
+                  theme === 'dark'
+                    ? 'bg-neutral-900 border-neutral-800 hover:border-neutral-700 text-indigo-400 hover:text-indigo-250'
+                    : 'bg-white border-neutral-200 hover:border-neutral-350 text-indigo-600 hover:text-indigo-850'
+                }`}
+              >
+                TRADE LOG
+              </a>
+
               <button 
                 data-action="manual-refresh"
                 title="Sync reference data"

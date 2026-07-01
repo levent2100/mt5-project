@@ -860,6 +860,21 @@ export default function Dashboard() {
               <span className="text-[10px] font-extrabold tracking-wider uppercase">Console Logs</span>
             </a>
 
+            {/* Trade Logs Page Link */}
+            <a
+              href="/tradelog"
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`px-3 py-2 rounded-lg border transition-all active:scale-95 flex items-center justify-center gap-1.5 ${
+                theme === 'dark'
+                  ? 'bg-neutral-900/80 border-neutral-850 text-indigo-400 hover:text-indigo-200 hover:border-neutral-700'
+                  : 'bg-neutral-100 border-neutral-250 text-indigo-600 hover:text-indigo-900 hover:border-neutral-450'
+              }`}
+              title="Compare Trade History and Slippage"
+            >
+              <span className="text-[10px] font-extrabold tracking-wider uppercase">Trade Logs</span>
+            </a>
+
             <button 
               onClick={handleManualRefresh} 
               className={`p-2 rounded-lg border active:scale-95 transition-all ${

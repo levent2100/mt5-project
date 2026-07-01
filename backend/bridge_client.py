@@ -102,3 +102,7 @@ class BridgeClient:
     async def cancel_order(self, instrument: str) -> Dict[str, Any]:
         """Cancel a specific symbol's pending order."""
         return await self._post("cancel_order", {"instrument": instrument})
+
+    async def get_history_trades(self) -> Dict[str, Any]:
+        """Fetch today's completed trades from this bridge."""
+        return await self._post("gethistorytrades")
