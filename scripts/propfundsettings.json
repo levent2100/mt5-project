@@ -29,7 +29,7 @@
         "BTC": 100.0
     },
     "ReferenceAccType": "MT5Accounts",
-    "ReferenceAccName": "25329254",
+    "ReferenceAccName": "55901624",
     "FutureAccounts": {
         "trade_enabled": false,
         "ip_port": "http://127.0.0.1:58800",
@@ -80,7 +80,7 @@
                 "AccType": "AccType dontcare",
                 "EvalCost": 0.0,
                 "ActivationCost": 0.0,
-                "name": "25329254",
+                "name": "55901624",
                 "AccSize": 100000.0,
                 "MaxLoss": 10000.0,
                 "EvalTarget": 10000.0,
@@ -135,7 +135,7 @@
                 "AccType": "AccType dontcare",
                 "EvalCost": 0.0,
                 "ActivationCost": 0.0,
-                "name": "52904156",
+                "name": "8045307",
                 "AccSize": 100000.0,
                 "MaxLoss": 10000.0,
                 "EvalTarget": 10000.0,
@@ -185,7 +185,7 @@
                 }
             },
             {
-                "trade_enabled": true,
+                "trade_enabled": false,
                 "Company": "3_Exness_Pro_Demo_10k",
                 "AccType": "AccType dontcare",
                 "EvalCost": 0.0,
@@ -240,7 +240,7 @@
                 }
             },
             {
-                "trade_enabled": true,
+                "trade_enabled": false,
                 "Company": "4_Exness_Raw_Demo_10k",
                 "AccType": "AccType dontcare",
                 "EvalCost": 0.0,
@@ -295,7 +295,7 @@
                 }
             },
             {
-                "trade_enabled": true,
+                "trade_enabled": false,
                 "Company": "5_Exness_Zero_Demo_10k",
                 "AccType": "AccType dontcare",
                 "EvalCost": 0.0,
@@ -350,7 +350,7 @@
                 }
             },
             {
-                "trade_enabled": true,
+                "trade_enabled": false,
                 "Company": "6_Exness_Standard_Demo_10k",
                 "AccType": "AccType dontcare",
                 "EvalCost": 0.0,
@@ -410,7 +410,7 @@
                 "AccType": "AccType dontcare",
                 "EvalCost": 0.0,
                 "ActivationCost": 0.0,
-                "name": "61537095",
+                "name": "51514735",
                 "AccSize": 100000.0,
                 "MaxLoss": 10000.0,
                 "EvalTarget": 10000.0,
@@ -465,7 +465,7 @@
                 "AccType": "AccType dontcare",
                 "EvalCost": 0.0,
                 "ActivationCost": 0.0,
-                "name": "78004608",
+                "name": "84142289",
                 "AccSize": 100000.0,
                 "MaxLoss": 10000.0,
                 "EvalTarget": 10000.0,
@@ -515,7 +515,7 @@
                 }
             },
             {
-                "trade_enabled": true,
+                "trade_enabled": false,
                 "Company": "9_Admirals_Demo_100k",
                 "AccType": "AccType dontcare",
                 "EvalCost": 0.0,
@@ -570,7 +570,7 @@
                 }
             },
             {
-                "trade_enabled": true,
+                "trade_enabled": false,
                 "Company": "10_Vantage_Demo_100k",
                 "AccType": "AccType dontcare",
                 "EvalCost": 0.0,

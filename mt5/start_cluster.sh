@@ -80,8 +80,8 @@ echo "5. Starting MT5 instances..."
 # Optimize Wine's X11 clipboard integration
 wine reg add "HKCU\Software\Wine\X11 Driver" /v UsePrimarySelection /t REG_SZ /d "y" /f
 
-# Dynamic loop for starting MT5 Instances 1 to 10
-for i in {1..10}; do
+# Dynamic loop for starting MT5 Instances 1, 2, 7, 8
+for i in 1 2 7 8; do
     TERMINAL_DIR="/config/.wine/drive_c/Program Files/MetaTrader 5_${i}"
     EXE_PATH="${TERMINAL_DIR}/terminal64.exe"
     if [ -f "${EXE_PATH}" ]; then
@@ -115,8 +115,8 @@ done
 # =====================================================================
 echo "6. Starting Custom HTTP Bridges..."
 
-# Dynamic loop for starting HTTP Bridges 1 to 10
-for i in {1..10}; do
+# Dynamic loop for starting HTTP Bridges 1, 2, 7, 8
+for i in 1 2 7 8; do
     BRIDGE_PATH="/root/scripts/mt5_http_bridge${i}.py"
     if [ -f "${BRIDGE_PATH}" ]; then
         echo "Starting HTTP Bridge ${i}..."
